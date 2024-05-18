@@ -7,10 +7,16 @@
     "browser_action": {
         "default_icon": "icons/icon.png",
         "default_title": "test",
-        "default_popup": "dist/index.html"
+        "default_popup": "/dist/index.html"
     },
-    "content_scripts": {
-        "matches": ["<all_urls>"],
-        "js": ["content-main.js"]
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["/dist/content-main.js"]
+        }
+    ],
+    "background": {
+        "scripts": ["/dist/background-main.js"],
+        "persistent": false
     }
 }

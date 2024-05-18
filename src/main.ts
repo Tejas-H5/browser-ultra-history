@@ -1,8 +1,8 @@
 import './styles.css'
 import './style-utils.css'
-import { Insertable, appendChild, div, newComponent, setCssVars, setText } from './dom-utils'
+import { Insertable, appendChild, div, newComponent, newListRenderer, setCssVars, setText } from './dom-utils'
 import { AppTheme, state } from './state';
-import { makeButton } from './generic-components';
+import browser from "webextension-polyfill";
 
 function getTheme(): AppTheme {
     if (state.currentTheme === "Dark") {
@@ -41,30 +41,41 @@ function setTheme(theme: AppTheme) {
 
 
 function App() {
-    let count = 0;
-
     const textEl = div();
-    const countEl = div();
-    const btn = makeButton("Count++;");
+    const messagesRoot = div();
+    const list = newListRenderer(messagesRoot, () => {
+        const root = div();
+        const component = newComponent<{message: any}>(root, renderMessage);
+        function renderMessage() {
+            let text = "";
+            try {
+                text = JSON.stringify(component.args.message);
+            } catch {
+                console.error("failed to stringify:", component.args.message);
+                text = "<not stringifieable!>";
+            }
+            setText(root, text);
+        }
+        return component;
+    });
+    
     const root = div({ class: "row solid-border-sm", style: "position: fixed; top: 10px; left: 10px; bottom: 10px; right: 10px;" }, [
         div({ class: "col flex-1 h-100 align-items-center justify-content-center" }, [
             textEl,
-            countEl,
-            btn,
+            list,
         ])
     ]);
 
     const component = newComponent(root, rerenderAppComponent);
 
     function rerenderAppComponent() {
-        setText(textEl, "Hello world!")
-        setText(countEl, "" + count);
+        setText(textEl, "Messages:")
+        list.render(() => {
+            for (const message of messages) {
+                list.getNext().render({ message });
+            }
+        });
     }
-
-    btn.el.addEventListener("click", () => {
-        count++;
-        rerenderAppComponent();
-    });
 
     return component;
 }
@@ -81,5 +92,12 @@ function rerenderApp() {
     app.render(app.args);
 }
 
+let messages: any[] = [];
 setTheme(getTheme());
 rerenderApp();
+
+browser.runtime.onMessage.addListener(handleMessage);
+function handleMessage(message: any) {
+    messages.push(message);
+    rerenderApp();
+}

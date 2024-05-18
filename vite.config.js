@@ -10,15 +10,14 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 // The popup page
-                "index.html": "/index.html",
+                "index": "/index.html",
                 // Extension background script
-                "background-main.js": "/src/background-main.ts",
+                "background-main": "/src/background-main.ts",
                 // Extension content script
-                "content-main.js": "/src/content-main.ts",
+                "content-main": "/src/content-main.ts",
             },
             output: {
                 entryFileNames: `[name].js`,
-                chunkFileNames: `[name].js`,
                 assetFileNames: `[name].[ext]`
             }
         }
