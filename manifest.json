@@ -3,11 +3,11 @@
     "name": "Test",
     "version": "1.0",
     "description": "Tryin to make an extension",
-    "permissions": ["activeTab", "storage", "webNavigation"],
+    "permissions": ["activeTab", "storage", "webNavigation","tabs"],
     "browser_action": {
         "default_icon": "icons/icon.png",
         "default_title": "test",
-        "default_popup": "/dist/index.html"
+        "default_popup": "/popup.html"
     },
     "content_scripts": [
         {

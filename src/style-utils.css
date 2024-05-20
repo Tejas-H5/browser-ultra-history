@@ -59,6 +59,11 @@
     display: inline;
 }
 
+.align-items-stretch {
+    align-items: stretch;
+}
+
+
 .align-items-center {
     align-items: center;
 }

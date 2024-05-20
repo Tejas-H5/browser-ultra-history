@@ -1,12 +1,20 @@
-(() => {
-    if (window.__ran_content_script) return;
-    window.__ran_content_script = true;
+import { recieveMessage } from "./message";
+declare global {
+    interface Window {
+        __ran_content_script?: boolean;
+    }
+}
 
-    const POLL_INTERVAL = 5000;
 
-    browser.runtime.sendMessage("Registed an event handler.");
-    setInterval(() => {
-        console.log("Sending da message");
-        browser.runtime.sendMessage("Hi bg scropt. how u doin bro");
-    }, POLL_INTERVAL);
-})();
+if (process.env.ENVIRONMENT === "dev") {
+    console.log("Loaded content main!")
+}
+
+recieveMessage((message, _sender, response) => {
+    if (message.type === "collect_urls") {
+        response({
+            type: "urls",
+            urls: [window.location.href],
+        });
+    }
+}, "content");
