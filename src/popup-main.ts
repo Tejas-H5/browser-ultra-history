@@ -3,6 +3,7 @@ import './style-utils.css'
 import { Insertable, appendChild, div, newComponent, newListRenderer, setClass, setText } from './dom-utils'
 import { collectUrlsFromTabs, getTheme, getUrlMessages, setTheme } from './state';
 import { makeButton } from './generic-components';
+import { UrlInfo } from './message';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -13,10 +14,15 @@ function App() {
 
     const list = newListRenderer(messagesRoot, () => {
         const root = div();
-        const c = newComponent<{message: string}>(root, render);
+
+        const c = newComponent<{info: UrlInfo}>(root, render);
+
         function render() {
-            setText(root, c.args.message);
+            console.log(c.args.info);
+            const url = c.args.info.url;
+            setText(root, "length=" + url.length + " - " + url);
         }
+
         return c;
     });
 
@@ -30,7 +36,7 @@ function App() {
             div({ class: "row" }, [
                 collectButton,
             ]),
-            div({ class: "flex-1" }, [
+            div({ class: "flex-1 overflow-y-auto" }, [
                 list,
             ]),
         ]),
@@ -44,11 +50,11 @@ function App() {
     function rerenderAppComponent() {
         setClass(list, "unfocused-text-color", true);
         getUrlMessages().then((messages) => {
-            console.log("messageS", messages);
             setClass(list, "unfocused-text-color", false);
             list.render(() => {
-                for (const url of Object.keys(messages)) {
-                    list.getNext().render({ message: url });
+                console.log(messages);
+                for (const url in messages) {
+                    list.getNext().render({ info: messages[url] });
                 }
             });
         });

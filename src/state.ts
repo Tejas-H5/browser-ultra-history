@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { setCssVars } from "./dom-utils";
-import { sendMessageToTabs } from "./message";
+import { UrlInfo, sendMessageToTabs } from "./message";
 
 function getStorageArea() {
     return browser.storage.local;
@@ -59,8 +59,11 @@ export async function setTheme(theme: AppTheme) {
 
 
 
-export async function getUrlMessages(): Promise<Record<string, any>> {
+export async function getUrlMessages(): Promise<Record<string, UrlInfo>> {
     const res = await getStorageArea().get(URLS_KEY);
+
+    console.log("got urls", res);
+
     return res[URLS_KEY] ?? {};
 }
 
@@ -74,14 +77,9 @@ export async function collectUrlsFromTabs() {
 
     const savedUrls = await getUrlMessages();
 
-    function addUrl(url: string) {
-        if (url in savedUrls) {
-            return;
-        }
-
-        savedUrls[url] = {
-            visited: new Date().toISOString(),
-        };
+    console.log("saved urls", savedUrls);
+    function addUrl(urlInfo: UrlInfo) {
+        savedUrls[urlInfo.url] = urlInfo;
     }
 
     for (const res of responses) {

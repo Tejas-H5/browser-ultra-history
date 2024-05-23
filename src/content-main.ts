@@ -1,4 +1,6 @@
-import { recieveMessage } from "./message";
+import { Message, UrlInfo, UrlMetadata, recieveMessage } from "./message";
+import { forEachMatch, matchAllRanges } from "./re";
+import { forEachUrl } from "./url";
 declare global {
     interface Window {
         __ran_content_script?: boolean;
@@ -11,10 +13,101 @@ if (process.env.ENVIRONMENT === "dev") {
 }
 
 recieveMessage((message, _sender, response) => {
-    if (message.type === "collect_urls") {
-        response({
-            type: "urls",
-            urls: [window.location.href],
+    function respond(message: Message | undefined) {
+        if (message) {
+            response(message);
+        }
+    }
+
+    switch (message.type) {
+        case "collect_urls": return respond(getUrls());
+    }
+
+}, "content");
+
+function forEachDescendant(el: Element, fn: (el: Element) => void) {
+    fn(el);
+
+    for (let i = 0; i < el.children.length; i++) {
+        fn(el.children[i]);
+    }
+}
+
+function getUrls(): Message | undefined {
+    const root = document.querySelector("html");
+    if (!root) {
+        return undefined;
+    }
+
+    const tabUrl = window.location.href;
+    const urls: UrlInfo[] = [];
+    const pushUrl = (url: string, metadata: UrlMetadata) => {
+        urls.push({
+            url, 
+            urlCollectedFrom: tabUrl,
+            visitedAt: new Date().toISOString(),
+            metadata,
         });
     }
-}, "content");
+
+    pushUrl(tabUrl, { source: "directly-visited" });
+
+    function pushAllOfAttr(tag: string, attr: string) {
+        for (const el of document.getElementsByTagName(tag)) {
+            // @ts-expect-error trust me bro
+            pushUrl(el[attr], { source: "attribute", attrName: attr });
+        }
+    }
+
+    pushAllOfAttr("a", "href");
+    pushAllOfAttr("link", "href");
+    pushAllOfAttr("img", "src");
+
+    // elements with inline styles
+    for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
+        for (const i of el.style) {
+            // @ts-expect-error trust me bro
+            const val = el.style[i];
+            if (!val) {
+                continue;
+            }
+
+            forEachMatch(val, /url\((.*?)\)/g, (matches) => {
+                const url = matches[1];
+                pushUrl(url, { source: "style", styleName: "" });
+            })
+        }
+    }
+
+    // stylesheets
+    for (const el of document.getElementsByTagName("style")) {
+        const val = el.textContent;
+        if (!val) {
+            continue;
+        }
+
+        forEachMatch(val, /url\(["'](.*?)["']\)/g, (matches) => {
+            const url = matches[1];
+            pushUrl(url, { source: "style", styleName: "" });
+        });
+    }
+
+    // all text
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+        const val = walker.currentNode.textContent;
+        if (!val) {
+            continue;
+        }
+
+        // going to use a regex off the internet to make this a bit faster, hopefully
+        const urlRegex = /((http|blob|https|ftp):\/\/\S+?)([ "']|$)/g;
+        forEachMatch(val, urlRegex, (matches) => {
+            const url = matches[1];
+            console.log(url)
+            pushUrl(url, { source: "text", text: val });
+        });
+    }
+
+    return { type: "urls", urls };
+}

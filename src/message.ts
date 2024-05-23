@@ -5,8 +5,26 @@ export type Message = {
     type: "collect_urls",
 } | {
     type: "urls";
-    urls: string[];
+    urls: UrlInfo[];
+} | {
+    type: "log";
+    message: string;
+    tabUrl: string;
 };
+
+export type UrlInfo = {
+    url: string;
+    urlCollectedFrom: string;
+    visitedAt: string;
+    metadata: UrlMetadata;
+} 
+
+export type UrlMetadata =
+    { source: "directly-visited" } |
+    { source: "text", text: string } |
+    { source: "style", styleName: string } |
+    { source: "attribute", attrName: string }
+
 
 export function sendMessage(message: Message) {
     browser.runtime.sendMessage(message);
