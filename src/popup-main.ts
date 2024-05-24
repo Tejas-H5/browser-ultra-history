@@ -18,7 +18,6 @@ function App() {
         const c = newComponent<{info: UrlInfo}>(root, render);
 
         function render() {
-            console.log(c.args.info);
             const url = c.args.info.url;
             setText(root, "length=" + url.length + " - " + url);
         }
@@ -45,24 +44,32 @@ function App() {
         ]),
     ]);
 
-    const component = newComponent(root, rerenderAppComponent);
+    const component = newComponent(root, () => rerenderAppComponent());
 
-    function rerenderAppComponent() {
+    async function rerenderAppComponent() {
         setClass(list, "unfocused-text-color", true);
-        getUrlMessages().then((messages) => {
-            setClass(list, "unfocused-text-color", false);
-            list.render(() => {
-                console.log(messages);
-                for (const url in messages) {
-                    list.getNext().render({ info: messages[url] });
+
+        const urls = await getUrlMessages();
+        setClass(list, "unfocused-text-color", false);
+        list.render(() => {
+            for (const key in urls) {
+                const info = urls[key];
+                if (info.url) {
+                    list.getNext().render({ info });
                 }
-            });
+            }
         });
     }
 
     collectButton.el.addEventListener("click", () => {
-        collectUrlsFromTabs().then(() => rerenderApp());
+        handleClick();
     });
+
+    async function handleClick() {
+        await collectUrlsFromTabs();
+
+        rerenderApp();
+    }
 
     return component;
 }
@@ -80,7 +87,7 @@ function rerenderApp() {
 }
 
 (async () => {
-    setTheme(await getTheme());
+    await setTheme(await getTheme());
 })();
 
 rerenderApp();

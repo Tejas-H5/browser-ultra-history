@@ -1,13 +1,38 @@
 import { recieveMessage } from "./message";
-import { clearAllForDev } from "./state";
+import { clearAllForDev, collectUrlsFromTabs, } from "./state";
 import browser from "webextension-polyfill";
 
 browser.runtime.onInstalled.addListener(() => {
-    if (process.env.ENVIRONMENT === "dev") {
-        console.log("Loaded background main!")
-        clearAllForDev();
-    }
+    onStart();
 });
+
+function sleep(ms: number) {
+    return new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), ms);
+    });
+}
+
+async function onStart() {
+    try {
+        if (process.env.ENVIRONMENT === "dev") {
+            console.log("Loaded background main!")
+
+            const initialCollect = true;
+
+            if (initialCollect) {
+                console.log("Clearing all for dev");
+                await clearAllForDev();
+
+                await sleep(1000);
+
+                await collectUrlsFromTabs().catch(console.error)
+            }
+        }
+
+    } catch (e) {
+        console.error(e);
+    }
+}
 
 recieveMessage((message) => {
     if (message.type === "log") {

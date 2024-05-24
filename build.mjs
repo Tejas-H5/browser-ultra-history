@@ -11,6 +11,7 @@ async function buildEntrypoint(entrypointFilename, env) {
 		minify: !!minify,
 		define: {
 			"process.env.ENVIRONMENT": `"${env}"`,
+			"process.env.SCRIPT": `"${entrypointFilename}"`,
 		}
 	});
 }

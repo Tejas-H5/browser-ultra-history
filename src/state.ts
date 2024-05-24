@@ -1,27 +1,26 @@
 import browser from "webextension-polyfill";
 import { setCssVars } from "./dom-utils";
-import { UrlInfo, sendMessageToTabs } from "./message";
+import { UrlInfo, sendLog, sendMessageToTabs } from "./message";
+import { hashCode } from "./hash";
 
-function getStorageArea() {
-    return browser.storage.local;
-}
+const defaultStorageArea = browser.storage.local;
 
 
 declare global {
     const process: {
         env: {
             ENVIRONMENT: "dev" | "prod";
-        }
+            SCRIPT: "background-main" | "content-main" | "popup-main";
+        },
     };
 }
 
 export type AppTheme = "Dark" | "Light";
 
 const THEME_KEY = "theme";
-const URLS_KEY = "urls";
 
 export async function getTheme(): Promise<AppTheme> {
-    const storage = await getStorageArea().get(THEME_KEY);
+    const storage = await defaultStorageArea.get(THEME_KEY);
     const theme = storage[THEME_KEY];
     if (theme === "Dark") {
         return "Dark";
@@ -31,7 +30,7 @@ export async function getTheme(): Promise<AppTheme> {
 };
 
 export async function setTheme(theme: AppTheme) {
-    getStorageArea().set({ [THEME_KEY]: theme });
+    await defaultStorageArea.set({ [THEME_KEY]: theme });
 
     if (theme === "Light") {
         setCssVars([
@@ -58,39 +57,60 @@ export async function setTheme(theme: AppTheme) {
 };
 
 
-
 export async function getUrlMessages(): Promise<Record<string, UrlInfo>> {
-    const res = await getStorageArea().get(URLS_KEY);
+    console.log("getting urls...");
 
-    console.log("got urls", res);
+    // TODO: Fix this. right now its experimental - I'm seeing if I can just save everything at the root level, and if it makes a difference as to whether I can fetch it or not.
+    const res = await defaultStorageArea.get([ "savedUrls" ]);
+    if (!res?.savedUrls) {
+        return {};
+    }
 
-    return res[URLS_KEY] ?? {};
+    const savedUrls = res.savedUrls;
+    console.log("got urls", Object.keys(savedUrls).length, savedUrls);
+    return savedUrls;
 }
 
 export async function clearAllForDev() {
-    return getStorageArea().clear();
+    await defaultStorageArea.clear();
 }
 
 
 export async function collectUrlsFromTabs() {
+    sendLog("state", "sending messages to tabs");
     const responses = await sendMessageToTabs({ type: "collect_urls" });
 
+    sendLog("state", "getting existing urls");
     const savedUrls = await getUrlMessages();
 
-    console.log("saved urls", savedUrls);
     function addUrl(urlInfo: UrlInfo) {
-        savedUrls[urlInfo.url] = urlInfo;
+        // TODO: handle multiple urls pointing to the same thing
+        
+        // Using a hash here, because we get an undocumented error when we try to save with keys that are too long.
+        // TODO: handle collisions, verify if above is correct.
+        const hash = hashCode(urlInfo.url);
+        savedUrls[hash] = urlInfo;
     }
 
+    await sendLog("state", "Merging urls");
     for (const res of responses) {
-        if (res.type === "urls") {
-            for (const url of res.urls) {
-                addUrl(url);
-            }
+        if (res.type !== "urls") {
+            continue;
+        }
+
+        for (const url of res.urls) {
+            addUrl(url);
         }
     }
 
-    return await getStorageArea().set({ [URLS_KEY]: savedUrls });
+    await sendLog("state", "Saving...");
+    if (process.env.SCRIPT === "background-main") {
+        console.log(savedUrls);
+    }
+
+    await defaultStorageArea.set({ "savedUrls": savedUrls });
+
+    await sendLog("state", "Saved!");
 }
 
 

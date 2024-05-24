@@ -1,6 +1,6 @@
-import { Message, UrlInfo, UrlMetadata, recieveMessage } from "./message";
-import { forEachMatch, matchAllRanges } from "./re";
-import { forEachUrl } from "./url";
+import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, } from "./message";
+import { forEachMatch, } from "./re";
+
 declare global {
     interface Window {
         __ran_content_script?: boolean;
@@ -25,23 +25,25 @@ recieveMessage((message, _sender, response) => {
 
 }, "content");
 
-function forEachDescendant(el: Element, fn: (el: Element) => void) {
-    fn(el);
-
-    for (let i = 0; i < el.children.length; i++) {
-        fn(el.children[i]);
-    }
-}
-
 function getUrls(): Message | undefined {
     const root = document.querySelector("html");
     if (!root) {
         return undefined;
     }
 
+
     const tabUrl = window.location.href;
     const urls: UrlInfo[] = [];
     const pushUrl = (url: string, metadata: UrlMetadata) => {
+        url = url.trim();
+        if (
+            !url ||
+            url.startsWith("data:") || 
+            url.startsWith("javascript:") 
+        ) {
+            return;
+        }
+
         urls.push({
             url, 
             urlCollectedFrom: tabUrl,
@@ -52,9 +54,10 @@ function getUrls(): Message | undefined {
 
     pushUrl(tabUrl, { source: "directly-visited" });
 
+    sendLog(tabUrl, "started collection");
+
     function pushAllOfAttr(tag: string, attr: string) {
         for (const el of document.getElementsByTagName(tag)) {
-            // @ts-expect-error trust me bro
             pushUrl(el[attr], { source: "attribute", attrName: attr });
         }
     }
@@ -63,10 +66,11 @@ function getUrls(): Message | undefined {
     pushAllOfAttr("link", "href");
     pushAllOfAttr("img", "src");
 
+    sendLog(tabUrl, "collected from attributes");
+
     // elements with inline styles
     for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
         for (const i of el.style) {
-            // @ts-expect-error trust me bro
             const val = el.style[i];
             if (!val) {
                 continue;
@@ -86,11 +90,14 @@ function getUrls(): Message | undefined {
             continue;
         }
 
+        // Matching the css url("blah") function contents here.
         forEachMatch(val, /url\(["'](.*?)["']\)/g, (matches) => {
             const url = matches[1];
             pushUrl(url, { source: "style", styleName: "" });
         });
     }
+
+    sendLog(tabUrl, "collected from styles");
 
     // all text
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -108,6 +115,8 @@ function getUrls(): Message | undefined {
             pushUrl(url, { source: "text", text: val });
         });
     }
+
+    sendLog(tabUrl, "collected from all text");
 
     return { type: "urls", urls };
 }

@@ -27,7 +27,16 @@ export type UrlMetadata =
 
 
 export function sendMessage(message: Message) {
-    browser.runtime.sendMessage(message);
+    return browser.runtime.sendMessage(message);
+}
+
+export function sendLog(tabUrl: string, text: string) {
+    if (process.env.SCRIPT === "background-main") {
+        console.log(tabUrl, text);
+        return;
+    }
+
+    return sendMessage({ tabUrl, type: "log", message: text });
 }
 
 export function recieveMessage(callback: (message: Message, sender: object, response: (message: Message) => void) => void, _debug: string = "idk") {
