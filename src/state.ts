@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import { setCssVars } from "./dom-utils";
+import { setCssVars } from "./utils/dom-utils";
 import { UrlInfo, sendLog, sendMessageToTabs } from "./message";
 
 const defaultStorageArea = browser.storage.local;
@@ -56,16 +56,20 @@ export async function setTheme(theme: AppTheme) {
 };
 
 
+const KEYS = {
+    savedUrls: "savedUrls",
+};
+
 export async function getUrlMessages(): Promise<Record<string, UrlInfo>> {
     console.log("getting urls...");
 
     // TODO: Fix this. right now its experimental - I'm seeing if I can just save everything at the root level, and if it makes a difference as to whether I can fetch it or not.
-    const res = await defaultStorageArea.get([ "savedUrls" ]);
-    if (!res?.savedUrls) {
+    const res = await defaultStorageArea.get([ KEYS.savedUrls ]);
+    if (!res?.[KEYS.savedUrls]) {
         return {};
     }
 
-    const savedUrls = res.savedUrls;
+    const savedUrls = res[KEYS.savedUrls];
     console.log("got urls", Object.keys(savedUrls).length, savedUrls);
     return savedUrls;
 }
@@ -106,16 +110,4 @@ export async function collectUrlsFromTabs() {
 
     await sendLog("state", "Saved! length=" + Object.keys(savedUrls).length);
 }
-
-
-
-
-
-
-
-
-
-
-
-
 

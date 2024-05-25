@@ -1,5 +1,5 @@
 import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, } from "./message";
-import { forEachMatch, } from "./re";
+import { forEachMatch, } from "./utils/re";
 
 declare global {
     interface Window {

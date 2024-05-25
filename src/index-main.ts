@@ -1,4 +1,4 @@
-import { Insertable, appendChild, div, newComponent, setText } from './dom-utils'
+import { Insertable, appendChild, div, newComponent, setText } from './utils/dom-utils'
 import { getTheme, setTheme } from './state';
 
 if (process.env.ENVIRONMENT === "dev") {
@@ -20,7 +20,6 @@ function App() {
     async function renderAppComponent() {
         setText(text, "Henlo");
     }
-
 
     return component;
 }

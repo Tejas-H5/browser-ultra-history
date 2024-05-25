@@ -1,6 +1,6 @@
-import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from './dom-utils'
+import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from './utils/dom-utils'
 import { collectUrlsFromTabs, getTheme, getUrlMessages, setTheme } from './state';
-import { makeButton } from './generic-components';
+import { makeButton } from './utils/generic-components';
 import browser from "webextension-polyfill";
 
 if (process.env.ENVIRONMENT === "dev") {
