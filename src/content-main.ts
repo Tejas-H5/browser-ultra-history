@@ -58,6 +58,7 @@ function getUrls(): Message | undefined {
 
     function pushAllOfAttr(tag: string, attr: string) {
         for (const el of document.getElementsByTagName(tag)) {
+            // @ts-expect-error trust me bro
             pushUrl(el[attr], { source: "attribute", attrName: attr });
         }
     }
@@ -71,6 +72,7 @@ function getUrls(): Message | undefined {
     // elements with inline styles
     for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
         for (const i of el.style) {
+            // @ts-expect-error trust me bro
             const val = el.style[i];
             if (!val) {
                 continue;
@@ -109,10 +111,16 @@ function getUrls(): Message | undefined {
 
         // going to use a regex off the internet to make this a bit faster, hopefully
         const urlRegex = /((http|blob|https|ftp):\/\/\S+?)([ "']|$)/g;
-        forEachMatch(val, urlRegex, (matches) => {
+        forEachMatch(val, urlRegex, (matches, start, end) => {
             const url = matches[1];
-            console.log(url)
-            pushUrl(url, { source: "text", text: val });
+
+            // Saving the entire text will slow down the extention and even cause saving to fail...
+            const CONTEXT = 50;
+            const prefix = start-CONTEXT > 0 ? "..." : "";
+            const suffix = start+CONTEXT < val.length ? "..." : "";
+            const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
+
+            pushUrl(url, { source: "text", text:contextString }); 
         });
     }
 

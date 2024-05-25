@@ -143,17 +143,20 @@
     border-radius: 6px;
 }
 
-.sb1l {
-    border-left: 1px solid var(--fg-color);
+.sbl1 {
+    border-left: px solid var(--fg-color);
 }
-.sb1r {
-    border-right: 1px solid var(--fg-color);
+
+.sbr1 {
+    border-right: px solid var(--fg-color);
 }
-.sb1t {
-    border-top: 1px solid var(--fg-color);
+
+.sbt1 {
+    border-top: px solid var(--fg-color);
 }
-.sb1b {
-    border-bottom: 1px solid var(--fg-color);
+
+.sbb1 {
+    border-bottom: px solid var(--fg-color);
 }
 
 .solid-border-sm {

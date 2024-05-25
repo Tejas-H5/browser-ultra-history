@@ -239,16 +239,20 @@ export function div(attrs?: Attrs, children?: ChildList) {
     return el<HTMLDivElement>("DIV", attrs, children);
 }
 
+export function setErrorClass(root: Insertable, state: boolean) {
+    setClass(root, "catastrophic---error", state);
+}
+
 function handleRenderingError(root: Insertable, renderFn: () => void) {
     // While this still won't catch errors with callbacks, it is still extremely helpful.
     // By catching the error at this component and logging it, we allow all other components to render as expected, and
     // It becomes a lot easier to spot the cause of a bug.
 
     try {
-        setClass(root, "catastrophic---error", false);
+        setErrorClass(root, false);
         renderFn();
     } catch (e) {
-        setClass(root, "catastrophic---error", true);
+        setErrorClass(root, true);
         console.error("An error occured while rendering your component:", e);
     }
 }
@@ -364,6 +368,10 @@ export function setText(component: Insertable, text: string) {
         console.warn("You might be overwriting a component's internal contents by setting it's text");
     };
 
+    if (!component._isInserted) {
+        console.warn("A component hasn't been inserted into the DOM, but it's being rendered anway");
+    }
+
     if (component.el.textContent === text) {
         // Actually a huge performance speedup!
         return;
@@ -468,6 +476,7 @@ export function scrollIntoViewV(
 
 export function setCssVars(vars: [string, string][]) {
     const cssRoot = document.querySelector(":root") as HTMLElement;
+    console.log(cssRoot);
     for (const [k, v] of vars) {
         cssRoot.style.setProperty(k, v);
     }

@@ -17,7 +17,7 @@ async function onStart() {
         if (process.env.ENVIRONMENT === "dev") {
             console.log("Loaded background main!")
 
-            const initialCollect = true;
+            const initialCollect = false;
 
             if (initialCollect) {
                 console.log("Clearing all for dev");

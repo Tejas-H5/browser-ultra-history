@@ -1,7 +1,6 @@
 import browser from "webextension-polyfill";
 import { setCssVars } from "./dom-utils";
 import { UrlInfo, sendLog, sendMessageToTabs } from "./message";
-import { hashCode } from "./hash";
 
 const defaultStorageArea = browser.storage.local;
 
@@ -84,12 +83,7 @@ export async function collectUrlsFromTabs() {
     const savedUrls = await getUrlMessages();
 
     function addUrl(urlInfo: UrlInfo) {
-        // TODO: handle multiple urls pointing to the same thing
-        
-        // Using a hash here, because we get an undocumented error when we try to save with keys that are too long.
-        // TODO: handle collisions, verify if above is correct.
-        const hash = hashCode(urlInfo.url);
-        savedUrls[hash] = urlInfo;
+        savedUrls[urlInfo.url] = urlInfo;
     }
 
     await sendLog("state", "Merging urls");
@@ -110,7 +104,7 @@ export async function collectUrlsFromTabs() {
 
     await defaultStorageArea.set({ "savedUrls": savedUrls });
 
-    await sendLog("state", "Saved!");
+    await sendLog("state", "Saved! length=" + Object.keys(savedUrls).length);
 }
 
 
