@@ -1,4 +1,5 @@
 import { recieveMessage } from "./message";
+import { openExtensionTab } from "./open-pages";
 import { clearAllForDev, collectUrlsFromTabs, } from "./state";
 import browser from "webextension-polyfill";
 
@@ -16,6 +17,8 @@ async function onStart() {
     try {
         if (process.env.ENVIRONMENT === "dev") {
             console.log("Loaded background main!")
+
+            await openExtensionTab();
 
             const initialCollect = false;
 

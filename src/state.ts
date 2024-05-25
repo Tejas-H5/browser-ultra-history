@@ -4,23 +4,41 @@ import { UrlInfo, sendLog, sendMessageToTabs } from "./message";
 
 const defaultStorageArea = browser.storage.local;
 
-
 declare global {
     const process: {
+        // See the build script for the true types.
+        // I'm copying them over here for better autocomplete
         env: {
             ENVIRONMENT: "dev" | "prod";
-            SCRIPT: "background-main" | "content-main" | "popup-main";
+            SCRIPT: "background-main" | "content-main" | "popup-main" | "index-main";
         },
     };
 }
 
 export type AppTheme = "Dark" | "Light";
 
-const THEME_KEY = "theme";
+type State = {
+    savedUrls: Record<string, UrlInfo>;
+    lastCollectedAt: string;
+    theme: AppTheme;
+}
+
+async function getKey<K extends keyof State>(key: K): Promise<State[K] | undefined> {
+    const res = await defaultStorageArea.get([ key ]);
+    const val = res?.[key];
+    if (!val) {
+        return undefined;
+    }
+
+    return val as State[K];
+}
+
+async function setKeys<K extends keyof State>(vals: Record<K, State[K]>) {
+    await defaultStorageArea.set(vals);
+}
 
 export async function getTheme(): Promise<AppTheme> {
-    const storage = await defaultStorageArea.get(THEME_KEY);
-    const theme = storage[THEME_KEY];
+    const theme = await getKey("theme");
     if (theme === "Dark") {
         return "Dark";
     }
@@ -29,7 +47,7 @@ export async function getTheme(): Promise<AppTheme> {
 };
 
 export async function setTheme(theme: AppTheme) {
-    await defaultStorageArea.set({ [THEME_KEY]: theme });
+    await setKeys({ theme });
 
     if (theme === "Light") {
         setCssVars([
@@ -55,36 +73,38 @@ export async function setTheme(theme: AppTheme) {
     }
 };
 
+export async function getLastCollectedAtIso() {
+    return await getKey("lastCollectedAt");
+}
 
-const KEYS = {
-    savedUrls: "savedUrls",
-};
-
-export async function getUrlMessages(): Promise<Record<string, UrlInfo>> {
-    console.log("getting urls...");
-
-    // TODO: Fix this. right now its experimental - I'm seeing if I can just save everything at the root level, and if it makes a difference as to whether I can fetch it or not.
-    const res = await defaultStorageArea.get([ KEYS.savedUrls ]);
-    if (!res?.[KEYS.savedUrls]) {
-        return {};
+export async function getLastCollectedAt() {
+    const dateStr = await getLastCollectedAtIso();
+    if (!dateStr) {
+        return undefined;
     }
 
-    const savedUrls = res[KEYS.savedUrls];
-    console.log("got urls", Object.keys(savedUrls).length, savedUrls);
-    return savedUrls;
+    return new Date(dateStr);
+}
+
+export async function getCollectedUrls(): Promise<Record<string, UrlInfo>> {
+    const urls = await getKey("savedUrls");
+    if (!urls) {
+        return {};
+    }
+    
+    return urls;
 }
 
 export async function clearAllForDev() {
     await defaultStorageArea.clear();
 }
 
-
 export async function collectUrlsFromTabs() {
     sendLog("state", "sending messages to tabs");
     const responses = await sendMessageToTabs({ type: "collect_urls" });
 
     sendLog("state", "getting existing urls");
-    const savedUrls = await getUrlMessages();
+    const savedUrls = await getCollectedUrls();
 
     function addUrl(urlInfo: UrlInfo) {
         savedUrls[urlInfo.url] = urlInfo;
@@ -102,11 +122,14 @@ export async function collectUrlsFromTabs() {
     }
 
     await sendLog("state", "Saving...");
+
     if (process.env.SCRIPT === "background-main") {
         console.log(savedUrls);
     }
 
-    await defaultStorageArea.set({ "savedUrls": savedUrls });
+    const lastCollectedAt = new Date().toISOString();
+
+    await setKeys({ savedUrls, lastCollectedAt });
 
     await sendLog("state", "Saved! length=" + Object.keys(savedUrls).length);
 }

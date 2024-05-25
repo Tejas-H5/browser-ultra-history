@@ -1,71 +1,56 @@
-import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from './utils/dom-utils'
-import { collectUrlsFromTabs, getTheme, getUrlMessages, setTheme } from './state';
-import { makeButton } from './utils/generic-components';
-import browser from "webextension-polyfill";
+import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from 'src/utils/dom-utils'
+import { makeButton } from 'src/utils/generic-components';
+import { collectUrlsFromTabs, getTheme, getCollectedUrls, setTheme, clearAllForDev } from './state';
+import { openExtensionTab } from './open-pages';
+import { isNotOwnRenderMessage, recieveMessage, sendRerenderMessage } from './message';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
 }
 
-// NOTE: if this window can actually be opened in a maximized, and resizeable state, then 
-// I would actually use this function to open the extention in a new window. 
-// Unfortunately, this is not the case.
-// @ts-expect-error
-function openExtensionWindow() {
-    browser.windows.create({
-        url: "index.html",
-        state: "docked",
-    });
-}
-
-async function openExtensionTab() {
-    browser.tabs.create({
-        url: "index.html",
-        active: true,
-        index: 0,
-    });
-}
-
 // This page exists only for quick actions, and to link to the real extension page.
 function App() {
     const collectButton = makeButton("Collect");
-    const gotoTabButton = makeButton("Open Window");
+    const clearButton = makeButton("Clear");
+    const gotoTabButton = makeButton("Open Tab");
     const urlCountEl = div();
     
     const root = div({ class: "row sbt1", style: "gap: 3px" }, [
         collectButton,
+        div({}, ["|"]),
+        clearButton,
         div({}, ["|"]),
         gotoTabButton,
         div({ class: "flex-1" }),
         urlCountEl,
     ]);
 
-    const component = newComponent(root, () => rerenderAppComponent());
+    const component = newComponent(root, rerenderAppComponent);
 
     async function rerenderAppComponent() {
         setErrorClass(urlCountEl, false);
 
         try {
-            const urls = await getUrlMessages();
+            const urls = await getCollectedUrls();
             setText(urlCountEl, "urls: " + Object.keys(urls).length);
         } catch (e) {
             setErrorClass(urlCountEl, true);
         }
     }
 
-    collectButton.el.addEventListener("click", () => {
-        handleClick();
-    });
-
-    gotoTabButton.el.addEventListener("click", () => {
-        openExtensionTab();
-    });
-
-    async function handleClick() {
+    collectButton.el.addEventListener("click", async () => {
         await collectUrlsFromTabs();
-
         rerenderApp();
-    }
+    });
+
+    gotoTabButton.el.addEventListener("click", async () => {
+        await openExtensionTab();
+    });
+
+    clearButton.el.addEventListener("click", async () => {
+        await clearAllForDev();
+        rerenderApp();
+    });
 
     return component;
 }
@@ -85,9 +70,17 @@ body.style.width = "600px";
 
 // body.style.height = "600px";
 
-function rerenderApp() {
-    app.render(app.args);
+async function rerenderApp() {
+    await app.render(app.args);
+    await sendRerenderMessage();
 }
+
+recieveMessage((message) => {
+    console.log(message);
+    if (!isNotOwnRenderMessage(message)) {
+        rerenderApp();
+    }
+});
 
 (async () => {
     const theme = await getTheme();

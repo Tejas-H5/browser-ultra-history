@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "node build-dev.mjs",
+    "build": "tsc && node build-dev.mjs",
     "build-prod": "node build-prod.mjs"
   },
   "devDependencies": {

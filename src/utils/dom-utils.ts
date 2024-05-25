@@ -144,7 +144,7 @@ type ComponentPool<T extends Insertable> = {
     lastIdx: number;
     getNext(): T;
     getIdx(): number;
-    render(renderFn: () => void, noErrorBoundary?: boolean): void;
+    render(renderFn: () => void | Promise<void>, noErrorBoundary?: boolean): void | Promise<void>;
 }
 
 type KeyedComponentPool<K, T extends Insertable> = {
@@ -243,18 +243,20 @@ export function setErrorClass(root: Insertable, state: boolean) {
     setClass(root, "catastrophic---error", state);
 }
 
-function handleRenderingError(root: Insertable, renderFn: () => void) {
+function handleRenderingError<T>(root: Insertable, renderFn: () => T | undefined) {
     // While this still won't catch errors with callbacks, it is still extremely helpful.
     // By catching the error at this component and logging it, we allow all other components to render as expected, and
     // It becomes a lot easier to spot the cause of a bug.
 
     try {
         setErrorClass(root, false);
-        renderFn();
+        return renderFn();
     } catch (e) {
         setErrorClass(root, true);
         console.error("An error occured while rendering your component:", e);
     }
+
+    return undefined;
 }
 
 export type ComponentList<T extends Insertable> = Insertable & ComponentPool<T>;
@@ -287,10 +289,11 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
         render(renderFn, noErrorBoundary = false) {
             this.lastIdx = 0;
 
+            let res;
             if (noErrorBoundary) {
-                renderFn();
+                res = renderFn();
             } else {
-                handleRenderingError(this, renderFn);
+                res = handleRenderingError(this, renderFn);
             }
 
             while(this.components.length > this.lastIdx) {
@@ -298,6 +301,8 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
                 const component = this.components.pop()!;
                 component.el.remove();
             } 
+
+            return res;
         },
     }
 }
@@ -408,7 +413,7 @@ export function setInputValue(component: InsertableInput, text: string) {
  * component re-renders.
  *
  */
-export function newComponent<T = undefined>(root: Insertable, renderFn: () => void) {
+export function newComponent<T = undefined>(root: Insertable, renderFn: () => void | Promise<void>) {
     // We may be wrapping another component, i.e reusing it's root. So we should just do this
     root._isInserted = true;
     const component : Renderable<T> = {
@@ -424,9 +429,9 @@ export function newComponent<T = undefined>(root: Insertable, renderFn: () => vo
 
             component.args = argsIn;
             if (noErrorBoundary) {
-                renderFn();
+                return renderFn();
             } else {
-                handleRenderingError(this, renderFn);
+                return handleRenderingError(this, renderFn);
             }
         },
     };
@@ -436,7 +441,7 @@ export function newComponent<T = undefined>(root: Insertable, renderFn: () => vo
 
 export type Renderable<T = undefined> = Insertable & {
     args: T;
-    render(args: T, noErrorBoundary?: boolean):void;
+    render(args: T, noErrorBoundary?: boolean):void | Promise<void>;
 }
 
 export function isEditingTextSomewhereInDocument(): boolean {

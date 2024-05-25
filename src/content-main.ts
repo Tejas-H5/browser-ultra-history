@@ -1,4 +1,4 @@
-import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, } from "./message";
+import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, sendMessage, } from "./message";
 import { forEachMatch, } from "./utils/re";
 
 declare global {
@@ -24,6 +24,24 @@ recieveMessage((message, _sender, response) => {
     }
 
 }, "content");
+
+function getStyleName(inlineStyleAttributeText: string, startOfValue: number): string{ 
+    const colonIdx = inlineStyleAttributeText.lastIndexOf(":", startOfValue);
+    if (colonIdx === -1) {
+        return "";
+    }
+
+    let semiColonIdx = inlineStyleAttributeText.lastIndexOf(";", colonIdx - 1);
+    if (semiColonIdx === -1) {
+        semiColonIdx = 0;
+    }
+
+    return inlineStyleAttributeText.substring(semiColonIdx +1, colonIdx);
+}
+
+function cssUrlRegex() {
+    return /url\(["'](.*?)["']\)/g;
+}
 
 function getUrls(): Message | undefined {
     const root = document.querySelector("html");
@@ -71,17 +89,20 @@ function getUrls(): Message | undefined {
 
     // elements with inline styles
     for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
-        for (const i of el.style) {
-            // @ts-expect-error trust me bro
-            const val = el.style[i];
-            if (!val) {
+        for (const styleName in el.style) {
+            const val = el.style[styleName];
+            if (!val || typeof val !== "string") {
                 continue;
             }
 
-            forEachMatch(val, /url\((.*?)\)/g, (matches) => {
+            forEachMatch(val, cssUrlRegex(), (matches, start) => {
                 const url = matches[1];
-                pushUrl(url, { source: "style", styleName: "" });
-            })
+                if (styleName === "cssText") {
+                    sendLog(tabUrl, matches.join(", "));
+                }
+
+                pushUrl(url, { source: "style", styleName });
+            });
         }
     }
 
@@ -93,9 +114,11 @@ function getUrls(): Message | undefined {
         }
 
         // Matching the css url("blah") function contents here.
-        forEachMatch(val, /url\(["'](.*?)["']\)/g, (matches) => {
-            const url = matches[1];
-            pushUrl(url, { source: "style", styleName: "" });
+        forEachMatch(val, cssUrlRegex(), (matches, start) => {
+            const url = matches[1]
+
+            const styleName = getStyleName(val, start);
+            pushUrl(url, { source: "style", styleName });
         });
     }
 
@@ -109,7 +132,6 @@ function getUrls(): Message | undefined {
             continue;
         }
 
-        // going to use a regex off the internet to make this a bit faster, hopefully
         const urlRegex = /((http|blob|https|ftp):\/\/\S+?)([ "']|$)/g;
         forEachMatch(val, urlRegex, (matches, start, end) => {
             const url = matches[1];

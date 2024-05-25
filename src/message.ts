@@ -10,6 +10,9 @@ export type Message = {
     type: "log";
     message: string;
     tabUrl: string;
+} | {
+    type: "rerender";
+    context: string;
 };
 
 export type UrlInfo = {
@@ -61,10 +64,18 @@ export async function sendMessageToTabs(message: Message) {
     const responsesSettled = await Promise.allSettled(responses);
     const fulfilled: Message[] = [];
     for (const res of responsesSettled) {
-        if (res.status === "fulfilled") {
+        if (res.status === "fulfilled" && res.value) {
             fulfilled.push(res.value);
         }
     }
 
     return fulfilled;
+}
+
+export async function sendRerenderMessage() {
+    await sendMessage({ type: "rerender", context: process.env.SCRIPT });
+}
+
+export function isNotOwnRenderMessage(message: Message) {
+    return message.type !== "rerender" || message.context !== process.env.SCRIPT;
 }
