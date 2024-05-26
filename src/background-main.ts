@@ -1,7 +1,8 @@
 import { recieveMessage } from "./message";
 import { openExtensionTab } from "./open-pages";
-import { clearAllForDev, collectUrlsFromTabs, } from "./state";
+import { clearAllData, collectUrlsFromTabs, } from "./state";
 import browser from "webextension-polyfill";
+import { runTests } from "src/utils/tests";
 
 browser.runtime.onInstalled.addListener(() => {
     onStart();
@@ -16,18 +17,16 @@ function sleep(ms: number) {
 async function onStart() {
     try {
         if (process.env.ENVIRONMENT === "dev") {
-            console.log("Loaded background main!")
+            console.log("Loaded background main! running da tests?")
+
+            runTests();
 
             await openExtensionTab();
 
             const initialCollect = false;
-
             if (initialCollect) {
-                console.log("Clearing all for dev");
-                await clearAllForDev();
-
+                await clearAllData();
                 await sleep(1000);
-
                 await collectUrlsFromTabs().catch(console.error)
             }
         }

@@ -1,5 +1,5 @@
-import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, sendMessage, } from "./message";
-import { forEachMatch, } from "./utils/re";
+import { forEachMatch, } from "src/utils/re";
+import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, } from "./message";
 
 declare global {
     interface Window {
@@ -95,7 +95,7 @@ function getUrls(): Message | undefined {
                 continue;
             }
 
-            forEachMatch(val, cssUrlRegex(), (matches, start) => {
+            forEachMatch(val, cssUrlRegex(), (matches) => {
                 const url = matches[1];
                 if (styleName === "cssText") {
                     sendLog(tabUrl, matches.join(", "));

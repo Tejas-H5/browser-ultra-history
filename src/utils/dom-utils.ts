@@ -21,13 +21,6 @@ function CN<CNArgs>() {
    
 */
 
-export function assert(trueVal: any, ...msg: any[]): asserts trueVal {
-    if (!trueVal) { 
-        console.error(...msg); 
-        throw new Error("assertion failed!"); 
-    } 
-};
-
 export type InsertableGeneric<T extends HTMLElement | Text> = { 
     el: T;
     _isInserted: boolean;
@@ -239,6 +232,7 @@ export function div(attrs?: Attrs, children?: ChildList) {
     return el<HTMLDivElement>("DIV", attrs, children);
 }
 
+// NOTE: function might be removed later
 export function setErrorClass(root: Insertable, state: boolean) {
     setClass(root, "catastrophic---error", state);
 }
@@ -385,6 +379,10 @@ export function setText(component: Insertable, text: string) {
     component.el.textContent = text;
 };
 
+export function isEditingInput(component: Insertable): boolean {
+    return document.activeElement === component.el;
+}
+
 /** NOTE: assumes that component.el is an HTMLInputElement */
 export function setInputValue(component: InsertableInput, text: string) {
     const inputElement = component.el;
@@ -396,8 +394,12 @@ export function setInputValue(component: InsertableInput, text: string) {
         return;
     }
 
-    // @ts-ignore 
+    const { selectionStart, selectionEnd } = inputElement;
+
     inputElement.value = text;
+
+    inputElement.selectionStart = selectionStart;
+    inputElement.selectionEnd = selectionEnd;
 };
 
 /** 
@@ -481,7 +483,6 @@ export function scrollIntoViewV(
 
 export function setCssVars(vars: [string, string][]) {
     const cssRoot = document.querySelector(":root") as HTMLElement;
-    console.log(cssRoot);
     for (const [k, v] of vars) {
         cssRoot.style.setProperty(k, v);
     }

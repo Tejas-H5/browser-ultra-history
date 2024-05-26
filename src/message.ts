@@ -10,9 +10,6 @@ export type Message = {
     type: "log";
     message: string;
     tabUrl: string;
-} | {
-    type: "rerender";
-    context: string;
 };
 
 export type UrlInfo = {
@@ -70,12 +67,4 @@ export async function sendMessageToTabs(message: Message) {
     }
 
     return fulfilled;
-}
-
-export async function sendRerenderMessage() {
-    await sendMessage({ type: "rerender", context: process.env.SCRIPT });
-}
-
-export function isNotOwnRenderMessage(message: Message) {
-    return message.type !== "rerender" || message.context !== process.env.SCRIPT;
 }

@@ -1,8 +1,7 @@
 import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from 'src/utils/dom-utils'
-import { makeButton } from 'src/utils/generic-components';
-import { collectUrlsFromTabs, getTheme, getCollectedUrls, setTheme, clearAllForDev } from './state';
+import { makeButton } from 'src/components';
+import { collectUrlsFromTabs, getTheme, getCollectedUrls, setTheme, clearAllData, onStateChange } from './state';
 import { openExtensionTab } from './open-pages';
-import { isNotOwnRenderMessage, recieveMessage, sendRerenderMessage } from './message';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -14,7 +13,7 @@ function App() {
     const clearButton = makeButton("Clear");
     const gotoTabButton = makeButton("Open Tab");
     const urlCountEl = div();
-    
+
     const root = div({ class: "row sbt1", style: "gap: 3px" }, [
         collectButton,
         div({}, ["|"]),
@@ -48,7 +47,7 @@ function App() {
     });
 
     clearButton.el.addEventListener("click", async () => {
-        await clearAllForDev();
+        await clearAllData();
         rerenderApp();
     });
 
@@ -72,14 +71,10 @@ body.style.width = "600px";
 
 async function rerenderApp() {
     await app.render(app.args);
-    await sendRerenderMessage();
 }
 
-recieveMessage((message) => {
-    console.log(message);
-    if (!isNotOwnRenderMessage(message)) {
-        rerenderApp();
-    }
+onStateChange(() => {
+    rerenderApp();
 });
 
 (async () => {

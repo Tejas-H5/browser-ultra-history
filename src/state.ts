@@ -1,6 +1,7 @@
-import browser from "webextension-polyfill";
-import { setCssVars } from "./utils/dom-utils";
+import { setCssVars } from "src/utils/dom-utils";
 import { UrlInfo, sendLog, sendMessageToTabs } from "./message";
+import browser from "webextension-polyfill";
+import { logTrace } from "./utils/log";
 
 const defaultStorageArea = browser.storage.local;
 
@@ -95,8 +96,10 @@ export async function getCollectedUrls(): Promise<Record<string, UrlInfo>> {
     return urls;
 }
 
-export async function clearAllForDev() {
+export async function clearAllData() {
+    logTrace("Clearing all data...");
     await defaultStorageArea.clear();
+    logTrace("Cleared!");
 }
 
 export async function collectUrlsFromTabs() {
@@ -134,3 +137,8 @@ export async function collectUrlsFromTabs() {
     await sendLog("state", "Saved! length=" + Object.keys(savedUrls).length);
 }
 
+export function onStateChange(fn: () => void) {
+    defaultStorageArea.onChanged.addListener(() => {
+        fn();
+    });
+}

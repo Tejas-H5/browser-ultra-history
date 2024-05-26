@@ -1,4 +1,4 @@
-import { el } from "./dom-utils";
+import { el } from "src/utils/dom-utils";
 
 export function makeButton(text: string, classes: string = "", styles: string = "") {
     return el(
