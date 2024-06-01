@@ -1,10 +1,8 @@
 import * as esbuild from 'esbuild';
 
-async function buildEntrypoint(entrypointFilename, env) {
-	console.log("building ", entrypointFilename, " for ", env, "...");
-
+async function buildEntrypoint(entrypointFilename, env, watch) {
 	const minify = env === "prod";
-	await esbuild.build({
+	const ctx = await esbuild.context({
 		entryPoints: [`src/${entrypointFilename}.ts`],
 		bundle: true,
 		outfile: `pages/src/${entrypointFilename}.js`,
@@ -15,16 +13,25 @@ async function buildEntrypoint(entrypointFilename, env) {
 		}
 	});
 
+	if (watch) {
+		console.log("watching", entrypointFilename, "...");
+		await ctx.watch();
+	} else {
+		console.log("building ", entrypointFilename, " for ", env, "...");
+		await ctx.rebuild();
+		await ctx.dispose();
+	}
+
 	return entrypointFilename;
 }
 
-export async function build(env) {
+export async function build(env, watch = false) {
 	const builds = [
-		buildEntrypoint("popup-main", env),
-		buildEntrypoint("background-main", env),
-		buildEntrypoint("content-main", env),
-		buildEntrypoint("styles", env),
-		buildEntrypoint("index-main", env),
+		buildEntrypoint("popup-main", env, watch),
+		buildEntrypoint("background-main", env, watch),
+		buildEntrypoint("content-main", env, watch),
+		buildEntrypoint("styles", env, watch),
+		buildEntrypoint("index-main", env, watch),
 	];
 
 	const results = await Promise.allSettled(builds);

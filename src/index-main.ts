@@ -1,10 +1,8 @@
-import { Insertable, appendChild, div, initEl, newComponent, newListRenderer, setStyle, setText, setVisible } from 'src/utils/dom-utils'
-import { formatDate } from 'src/utils/datetime';
+import { Insertable, appendChild, div, initEl, newComponent, newListRenderer, newRenderGroup, setText, setVisible } from 'src/utils/dom-utils'
 import { getCollectedUrls, getLastCollectedAtIso, getTheme, onStateChange, setTheme } from './state';
 import { UrlInfo } from './message';
-import * as trie from 'src/utils/trie';
-import { commands } from 'webextension-polyfill';
 import { ScrollContainerV } from './components';
+import { Trie } from './trie';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")
@@ -14,7 +12,7 @@ const state = {
     urlsDict: {} as Record<string, UrlInfo>,
     urlsSorted: [] as UrlInfo[],
     lastUrlsCollectedAt: undefined as string | undefined,
-    urlsTrie: trie.newNode(""),
+    urlsTrie: new Trie(""),
 }
 
 async function refetchUrls() {
@@ -52,21 +50,20 @@ async function refetchUrls() {
         let t = state.urlsTrie;
 
         // I think hostname might be better than host here, since different ports may contain different stuff. Based off nothing tho
-        t = trie.getOrAddNode(t, url.hostname);
+        t = t.getOrAddNode(url.hostname);
 
         // Pathname always starts with a '/', hence .substring(1)
         const segments = url.pathname.substring(1).split("/");
         for (const seg of segments) {
-            t = trie.getOrAddNode(t, seg);
+            t = t.getOrAddNode(seg);
         }
 
-        // query params. they should be appended under the final segment,
-        // so the t = trie.getOrAddNode pattern doesn't apply here anymore
-        const finalSegmentNode = t;
-        for (const [k, v] of url.searchParams) {
-            const tK = trie.getOrAddNode(finalSegmentNode, k)
-            trie.getOrAddNode(tK, v)
-        }
+        // query params. they should be appended under the final segment.
+        // The specific combination matters, so they're being added as a single entry instead of multiple.
+        const params = [...url.searchParams];
+        params.sort((a, b) => a[0].localeCompare(b[0]));
+        const queryStr = "?" + params.map(([k, v]) => k + "=" + v).join("&");
+        t = t.getOrAddNode(queryStr);
     }
 
     state.urlsSorted = Object.values(state.urlsDict);
@@ -103,10 +100,11 @@ function Breadcrumbs() {
     return c;
 
     function BreadcrumbItem() {
-        const segmentEl = div();
+        const rg = newRenderGroup();
         const divider = div({ style: "padding: 0 10px" }, [ ">" ]);
         const root = div({ class: "row" }, [
-            segmentEl,
+            rg(div(), (el) => setText(el, c.args.segment)),
+            rg(divider, (el) => setVisible(el, c.args.divider)),
             divider,
         ]);
 
@@ -114,12 +112,7 @@ function Breadcrumbs() {
             divider: boolean;
             segment: string;
         }
-        const c = newComponent<Args>(root, render);
-
-        function render() {
-            setText(segmentEl, c.args.segment);
-            setVisible(divider, c.args.divider);
-        }
+        const c = newComponent<Args>(root, rg.render);
 
         return c;
     }
@@ -127,6 +120,86 @@ function Breadcrumbs() {
 
 /** Renders a URL Trie */
 function UrlTrie() {
+    function PathList() {
+        function UrlComponent() {
+            const rg = newRenderGroup();
+            const root = div({
+                class: "handle-long-words row",
+                style: "max-width: 500px",
+            }, [
+                rg(div(), (el) => setText(el, c.args.thisTrie.prefix)),
+                div({ class: "flex-1", style: "min-width: 10px" }),
+                rg(div(), (el) => setText(el, "" + c.args.thisTrie._count)),
+            ]);
+
+            type Args = {
+                thisTrie: Trie;
+                idx: number;
+                onClick(idx: number): void;
+            }
+
+            const c = newComponent<Args>(root, rg.render);
+
+            root.el.addEventListener("click", () => {
+                c.args.onClick(c.args.idx)
+            });
+
+            return c;
+        }
+
+        const autoscroller = initEl(ScrollContainerV(), { class: "flex-1 h-100", style: "padding: 5px" });
+        const root = div({ class: "col h-100" }, [
+            autoscroller,
+        ]);
+        const urlComponentList = newListRenderer(autoscroller, UrlComponent);
+
+        type Args = { 
+            lastTrie: Trie; 
+            thisTrie: Trie | undefined; 
+            pathIdx: number;
+            onClick(pathIndex: number, prefixIndex: number): void;
+        };
+        const c = newComponent<Args>(root, renderPathList);
+
+        function onClickItem(i: number) {
+            c.args.onClick(c.args.pathIdx, i);
+        }
+
+        function renderPathList() {
+            const { lastTrie, thisTrie } = c.args;
+
+            let scrollEl: Insertable | null = null;
+            lastTrie.recomputeChildrenSortedByCount();
+            const sortedChildren = lastTrie._childrenSortedByCount;
+            urlComponentList.render(() => {
+                for (let i = 0; i < sortedChildren.length; i++) {
+                    const isFocued = sortedChildren[i].prefix === thisTrie?.prefix;
+
+                    const listEl = urlComponentList.getNext();
+                    const thisTrieChild = sortedChildren[i];
+                    listEl.render({
+                        thisTrie: thisTrieChild,
+                        idx: i,
+                        onClick: onClickItem
+                    });
+
+                    if (isFocued) {
+                        scrollEl = listEl;
+                    }
+                }
+            });
+
+            const ONE_SECOND = 1000;
+            autoscroller.render({
+                scrollEl,
+                rescrollMs: 10 * ONE_SECOND,
+            });
+        }
+
+        return c;
+    }
+
+
     const listRoot = div({ class: "flex-1 row", style: "gap: 10px" });
     const list = newListRenderer(listRoot, PathList);
     const breadcrumbs = Breadcrumbs();
@@ -137,69 +210,52 @@ function UrlTrie() {
 
     const currentPath: string[] = [];
 
-    function fixCurrentPath() {
-        const { urlTrie } = component.args;
-
-        let lastTrie = urlTrie;
-        for (let i = 0; i < currentPath.length; i++) {
-            const segment = currentPath[i];
-            let thisTrie = trie.getNode(lastTrie, segment);
-            if (!thisTrie) {
-                if (lastTrie.children.length === 0) {
-                    currentPath.splice(i + 1, currentPath.length - i - 1);
-                    break;
-                }
-                
-                thisTrie = lastTrie.children[0];
-                currentPath[i] = thisTrie.prefix;
-            }
-
-            lastTrie = thisTrie;
-        }
-    }
-
     type Args = {
-        urlTrie: trie.TrieNode;
+        urlTrie: Trie;
     }
-    const component = newComponent<Args>(root, renderUrlTrie);
+    const c = newComponent<Args>(root, renderUrlTrie);
 
     async function renderUrlTrie() {
-        const { urlTrie } = component.args;
+        const { urlTrie } = c.args;
+
+        urlTrie.recomputeCountsRecursive();
 
         if (!setVisible(root, urlTrie.children.length > 0)) {
             return;
         }
 
-        fixCurrentPath();
-
         list.render(() => {
             let lastTrie = urlTrie;
-            for (let i = 0; i < currentPath.length; i++) {
-                const segment = currentPath[i];
-                let thisTrie = trie.getNode(lastTrie, segment);
 
+            console.log("started rendering trie");
+            for (let i = 0; i < currentPath.length; i++) {
+
+                console.log("started rendering trie", currentPath[i]);
+                const segment = currentPath[i];
+                let thisTrie = lastTrie.getNode(segment);
                 if (!thisTrie) {
-                    console.warn("The path wasn't fixed properly!");
-                    break;
+                    console.warn("bad path!");
+                    return;
                 }
 
                 const listEl = list.getNext();
                 listEl.render({
                     lastTrie,
                     thisTrie,
-                    onClick: handleClickPathItem,
                     pathIdx: i,
+                    onClick: onClickUrl,
                 });
 
                 lastTrie = thisTrie;
             }
 
+            console.log("started rendering trie", "final");
             const listEl = list.getNext();
             listEl.render({
                 lastTrie,
                 thisTrie: undefined,
-                onClick: handleClickPathItem,
                 pathIdx: currentPath.length,
+                onClick: onClickUrl,
             });
         });
 
@@ -208,100 +264,70 @@ function UrlTrie() {
         breadcrumbs.render({ path: currentPath });
     }
 
-    function handleClickPathItem(pathIdx: number, thisTrie: trie.TrieNode) {
-        // NOTE: pathIdx can also === currentPath.length here
-        if (pathIdx > currentPath.length) {
-            return;
+    function onClickUrl(parentPathIndex: number, prefixIdx: number) {
+        let trie = c.args.urlTrie;
+
+        for (let i = 0; i < parentPathIndex; i++) {
+            const children = trie._childrenSortedByCount;
+
+            if (i === currentPath.length) {
+                if (children.length === 0) {
+                    console.warn("How tf were we able to click on this??")
+                    return;
+                }
+
+                currentPath.push(children[i].prefix);
+                console.warn("invalid path, aborting early");
+                return;
+            }
+
+            const nextTrie = trie.getNode(currentPath[i]);
+            if (!nextTrie) {
+                if (children.length === 0) {
+                    console.warn("How tf were we able to click on this??")
+                    return;
+                }
+
+                while (currentPath.length > i && currentPath.length !== 0) {
+                    currentPath.pop();
+                }
+
+                currentPath.push(children[i].prefix);
+                console.warn("invalid path, aborting early");
+                return;
+            }
+
+            trie = nextTrie;
         }
 
-        currentPath[pathIdx] = thisTrie.prefix;
+        console.log({ parentPathIndex, prefixIdx });
+
+        const newSegment = trie._childrenSortedByCount[prefixIdx].prefix;;
+        if (newSegment !== currentPath[parentPathIndex]) {
+            currentPath[parentPathIndex] = newSegment;
+            currentPath.splice(parentPathIndex + 1, currentPath.length - parentPathIndex - 1);
+        }
 
         renderUrlTrie();
     }
 
-    return component;
-
-    function PathList() {
-        const root = initEl(ScrollContainerV(), { class: "h-100" });
-        const list = newListRenderer(root, UrlComponent);
-
-        type Args = { 
-            lastTrie: trie.TrieNode; 
-            thisTrie: trie.TrieNode | undefined; 
-            pathIdx: number;
-            onClick: (pathIdx: number, t: trie.TrieNode) => void;
-        };
-        const c = newComponent<Args>(root, renderPathList);
-
-        function renderPathList() {
-            const { lastTrie, thisTrie, onClick, pathIdx } = c.args;
-
-            let scrollEl: Insertable | null = null;
-            list.render(() => {
-                for (let i = 0; i < lastTrie.children.length; i++) {
-                    const isFocued = lastTrie.children[i].prefix === thisTrie?.prefix;
-
-                    const listEl = list.getNext();
-                    listEl.render({
-                        thisTrie: lastTrie.children[i],
-                        pathIdx,
-                        onClick,
-                    });
-
-                    if (isFocued) {
-                        scrollEl = listEl;
-                    }
-                }
-            });
-
-            const ONE_SECOND = 1000;
-            root.render({
-                scrollEl,
-                rescrollMs: 10 * ONE_SECOND,
-            });
-        }
-
-        return c;
-
-        function UrlComponent() {
-            const pathEl = div();
-            const root = div({
-                class: "handle-long-words row",
-            }, [
-                pathEl,
-            ]);
-
-            type Args = {
-                thisTrie: trie.TrieNode;
-                pathIdx: number;
-                onClick: (pathIdx: number, t: trie.TrieNode) => void;
-            }
-            const c = newComponent<Args>(root, render);
-
-            function render() {
-                const { thisTrie } = c.args;
-                setText(pathEl, thisTrie.prefix);
-            }
-
-            root.el.addEventListener("click", () => {
-                c.args.onClick(c.args.pathIdx, c.args.thisTrie);
-            });
-
-            return c;
-        }
-    }
+    return c;
 }
 
-// This page exists only for quick actions, and to link to the real extension page.
 function App() {
-    const urlList = UrlTrie();
-    const empty = div({ class: "row align-items-center justify-content-center" }, [ "No urls collected yet" ]);
+    const rg = newRenderGroup();
     const root = div({ 
         class: "fixed row", 
         style: "top: 0; bottom: 0; left: 0; right: 0;" 
     }, [
-        empty,
-        urlList,
+        rg(div({ class: "row align-items-center justify-content-center" }, ["No urls collected yet"]),
+            (el) => setVisible(el, !state.lastUrlsCollectedAt)
+        ),
+        rg(UrlTrie(), (urlList) => {
+            urlList.render({
+                urlTrie: state.urlsTrie,
+            });
+        })
     ]);
 
     const c = newComponent(root, render);
@@ -309,12 +335,7 @@ function App() {
     async function render() {
         await refetchUrls();
 
-        setVisible(empty, !state.lastUrlsCollectedAt)
-        if (setVisible(urlList, !!state.lastUrlsCollectedAt)) {
-            await urlList.render({
-                urlTrie: state.urlsTrie,
-            });
-        }
+        rg.render();
     }
 
     return c;

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc && node build-dev.mjs",
+    "watch": "tsc && node watch-dev.mjs",
+    "check": "tsc",
     "build-prod": "node build-prod.mjs"
   },
   "devDependencies": {
