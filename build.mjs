@@ -18,8 +18,13 @@ async function buildEntrypoint(entrypointFilename, env, watch) {
 		await ctx.watch();
 	} else {
 		console.log("building ", entrypointFilename, " for ", env, "...");
-		await ctx.rebuild();
-		await ctx.dispose();
+		try {
+			await ctx.rebuild();
+		} catch(e) {
+			throw e;
+		} finally {
+			await ctx.dispose();
+		}
 	}
 
 	return entrypointFilename;

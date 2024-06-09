@@ -1,80 +1,52 @@
-import { Insertable, appendChild, div, newComponent, setErrorClass, setText } from 'src/utils/dom-utils'
-import { makeButton } from 'src/components';
-import { collectUrlsFromTabs, getTheme, getCollectedUrls, setTheme, clearAllData, onStateChange } from './state';
-import { openExtensionTab } from './open-pages';
+import { div, initSPA, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import { getTheme, onStateChange, setTheme } from './state';
+import { TopBar } from './top-bar';
+import { UrlExplorer } from './url-explorer';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
 }
 
 // This page exists only for quick actions, and to link to the real extension page.
-function App() {
-    const collectButton = makeButton("Collect");
-    const clearButton = makeButton("Clear");
-    const gotoTabButton = makeButton("Open Tab");
-    const urlCountEl = div();
+// Also, it exists to navigate the 
+function PopupAppRoot() {
+    const rg = newRenderGroup();
 
-    const root = div({ class: "row sbt1", style: "gap: 3px" }, [
-        collectButton,
-        div({}, ["|"]),
-        clearButton,
-        div({}, ["|"]),
-        gotoTabButton,
-        div({ class: "flex-1" }),
-        urlCountEl,
-    ]);
+    const appRoot = div({
+        class: "fixed col", 
+        style: "top: 0; bottom: 0; left: 0; right: 0;"
+    }, [
+        rg.component(TopBar(false)),
+        rg.component(UrlExplorer()),
+    ])
 
-    const component = newComponent(root, rerenderAppComponent);
+    const component = newComponent(appRoot, render);
 
-    async function rerenderAppComponent() {
-        setErrorClass(urlCountEl, false);
-
-        try {
-            const urls = await getCollectedUrls();
-            setText(urlCountEl, "urls: " + Object.keys(urls).length);
-        } catch (e) {
-            setErrorClass(urlCountEl, true);
-        }
+    async function render() {
+        await rg.render();
     }
-
-    collectButton.el.addEventListener("click", async () => {
-        await collectUrlsFromTabs();
-        rerenderApp();
-    });
-
-    gotoTabButton.el.addEventListener("click", async () => {
-        await openExtensionTab();
-    });
-
-    clearButton.el.addEventListener("click", async () => {
-        await clearAllData();
-        rerenderApp();
-    });
 
     return component;
 }
 
-const app = App();
-
-const root: Insertable = {
-    el: document.querySelector<HTMLDivElement>('#app')!,
-    _isInserted: true,
-};
-
-appendChild(root, app);
+const app = PopupAppRoot();
+initSPA("#app", app);
 
 // Set the size to max
 const body = document.querySelector("body")!;
-body.style.width = "600px";
-
-// body.style.height = "600px";
+body.style.width = "800px";
+body.style.height = "600px";
 
 async function rerenderApp() {
     await app.render(app.args);
 }
 
+let stateChangeDebounceTimout = 0;
 onStateChange(() => {
-    rerenderApp();
+    clearTimeout(stateChangeDebounceTimout);
+    stateChangeDebounceTimout = setTimeout(() => {
+        rerenderApp();
+    }, 1000);
 });
 
 (async () => {

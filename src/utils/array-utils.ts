@@ -1,5 +1,3 @@
-import { assert } from "./assert";
-
 export function swap(arr: unknown[], a: number, b: number) {
     if (
         a < 0 || a >= arr.length ||
@@ -107,4 +105,3 @@ export function findInSortedArray<T, K>(arr: T[], val: K, key: (a: T) => K, comp
 
     return arr[idx];
 }
-

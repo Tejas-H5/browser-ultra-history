@@ -1,3 +1,5 @@
+import { uuid } from "./uuid";
+
 export type Insertable<T extends Element | Text = HTMLElement> = { 
     el: T;
     _isInserted: boolean;
@@ -166,45 +168,50 @@ export function getAttr(el: Insertable, key: string) {
     return el.el.getAttribute(key);
 }
 
-/** 
- * Useful for when you need to append to attributes/children 
- * on an Insertable returned by a function
- */
-export function initEl<T extends Insertable>(
+export function init<T>(obj: T, fn: (obj: T) => void): T {
+    fn(obj);
+    return obj;
+}
+
+export function setAttrs<T extends Insertable>(
     ins: T,
-    attrs?: Attrs,
-    children?: ChildList,
-    wrap = true
+    attrs: Attrs,
+    wrap = false,
 ): T {
-    const element = ins.el;
-
-    if (attrs) {
-        for (const attr in attrs) { 
-            if (attr === "style" && typeof attrs.style === "object") {
-                const styles = attrs[attr] as Record<keyof HTMLElement["style"], string | null>;
-                for (const s in styles) {
-                    // @ts-expect-error trust me bro
-                    setStyle(ins, s, styles[s]);
-                }
+    for (const attr in attrs) { 
+        if (attr === "style" && typeof attrs.style === "object") {
+            const styles = attrs[attr] as Record<keyof HTMLElement["style"], string | null>;
+            for (const s in styles) {
+                // @ts-expect-error trust me bro
+                setStyle(ins, s, styles[s]);
             }
-
-            setAttr(ins, attr, attrs[attr], wrap);
         }
+
+        setAttr(ins, attr, attrs[attr], wrap);
     }
 
-    if (children) {
-        for(const c of children) {
-            if (Array.isArray(c)) {
-                for (const insertable of c) {
-                    element.appendChild(insertable.el);
-                    insertable._isInserted = true;
-                }
-            } else if (typeof c === "string") {
-                element.appendChild(document.createTextNode(c));
-            } else {
-                element.appendChild(c.el);
-                c._isInserted = true;
+    return ins;
+}
+
+export function addChildren<T extends Insertable>(ins: T, children: ChildList): T {
+    const element = ins.el;
+
+
+    for (const c of children) {
+        if (c === false) {
+            continue;
+        }
+
+        if (Array.isArray(c)) {
+            for (const insertable of c) {
+                element.appendChild(insertable.el);
+                insertable._isInserted = true;
             }
+        } else if (typeof c === "string") {
+            element.appendChild(document.createTextNode(c));
+        } else {
+            element.appendChild(c.el);
+            c._isInserted = true;
         }
     }
 
@@ -227,13 +234,18 @@ export function el<T extends HTMLElement>(
         _isInserted: false,
     };
 
+    if (attrs) {
+        setAttrs(insertable, attrs);
+    }
 
-    initEl(insertable, attrs, children);
+    if (children) {
+        addChildren(insertable, children);
+    }
 
     return insertable;
 }
 
-export type ChildList = (Insertable | Insertable<Text> | string | Insertable[])[];
+export type ChildList = (Insertable | Insertable<Text> | string | Insertable[] | false)[];
 
 /**
  * Creates a div, gives it some attributes, and then appends some children. 
@@ -292,7 +304,6 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
             }
 
             if (this.lastIdx === this.components.length) {
-                // could also just show these with setVisible(true)
                 const component = createFn();
                 this.components.push(component);
                 appendChild(root, component);
@@ -311,7 +322,6 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
             }
 
             while(this.components.length > this.lastIdx) {
-                // could also just hide these with setVisible(false)
                 const component = this.components.pop()!;
                 component.el.remove();
             } 
@@ -319,6 +329,34 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
             return res;
         },
     }
+}
+
+/** 
+ * Why extract such simple method calls as `addEventListener` into it's own helper function?
+ * It's mainly so that the code minifier can minify all usages of this method, which should reduce the total filesize sent to the user.
+ * So in other words, the methods are extracted based on usage frequency and not complexity.
+ *
+ * Also I'm thinkig it might make defining simple buttons/interactions a bit simpler, but I haven't found this to be the case just yet.
+ */
+export function on<K extends keyof HTMLElementEventMap>(
+    ins: Insertable,
+    type: K, 
+    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
+    options?: boolean | AddEventListenerOptions
+) {
+    ins.el.addEventListener(type, listener, options);
+    return ins;
+}
+
+/** I've found this is very rarely used compared to `on`. Not that there's anything wrong with using this, of course */
+export function off<K extends keyof HTMLElementEventMap>(
+    ins: Insertable,
+    type: K, 
+    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
+    options?: boolean | EventListenerOptions,
+) {
+    ins.el.removeEventListener(type, listener, options);
+    return ins;
 }
 
 /**
@@ -385,8 +423,8 @@ export function setInputValueAndResize(inputComponent: InsertableInput, text: st
 }
 
 /** This is how I know to make an input that auto-sizes to it's text */
-export function resizeInputToValue(inputComponent: Insertable) {
-    inputComponent.el.setAttribute("size", "" + (inputComponent.el as HTMLInputElement).value.length);
+export function resizeInputToValue(inputComponent: InsertableInput) {
+    setAttr(inputComponent, "size", "" + inputComponent.el .value.length);
 }
 
 /** 
@@ -396,8 +434,7 @@ export function resizeInputToValue(inputComponent: Insertable) {
  * In those cases, you will want to avoid calling this function if you know the text hasn't changed.
  */
 export function setText(component: Insertable | Insertable<Text>, text: string) {
-    // @ts-ignore
-    if (component.rerender) {
+    if ("rerender" in component) {
         console.warn("You might be overwriting a component's internal contents by setting it's text");
     };
 
@@ -491,6 +528,15 @@ export function newRenderGroup() {
         text: (fn: () => string): Insertable<Text> => {
             return push(text(""), (el) => setText(el, fn()));
         },
+        component: (renderable: Renderable<undefined>) => {
+            return push(renderable, (r) => r.render(undefined));
+        },
+        componentArgs: <T>(renderable: Renderable<T>, argsFn: () => T) => {
+            return push(renderable, (r) => r.render(argsFn()));
+        },
+        if: (fn: () => boolean, ins: Insertable) => {
+            return push(ins, (r) => setVisible(r, fn()));
+        }
     });
 }
 
@@ -548,3 +594,88 @@ export function setCssVars(vars: [string, string][]) {
         cssRoot.style.setProperty(k, v);
     }
 };
+
+/**
+ * NOTE: this should always be called at a global scope on a *per-module* basis, and never on a per-component basis.
+ * Otherwise you'll just have a tonne of duplicate styles lying around in the DOM. 
+ */
+export function newStyleGenerator() {
+    const root = el<HTMLStyleElement>("style", { type: "text/css" });
+    document.body.appendChild(root.el);
+
+    const obj = {
+        // css class names can't start with numbers, but uuids occasionally do. hence "g-" + 
+        prefix: "g-" + uuid(),
+        makeClass: (className: string, styles: string[]): string => {
+            const name = obj.prefix + "-" + className;
+
+            for (const style of styles) {
+                root.el.appendChild(
+                    document.createTextNode(`.${name}${style}\n`)
+                );
+            }
+
+            return name;
+        }
+    };
+
+    return obj;
+}
+
+
+export function initSPA(rootQuerySelector: string, rootComponent: Renderable) {
+    const rootEl = document.querySelector<HTMLDivElement>('#app');
+    if (!rootEl) {
+        throw new Error("Couldn't find element for selector: " + rootQuerySelector);
+    }
+
+    // Entry point
+    const root: Insertable = {
+        _isInserted: true,
+        el: rootEl,
+    };
+
+    appendChild(root, rootComponent);
+}
+
+export function newAsyncState<T>(render: () => void, refetch: () => Promise<T>): AsyncState<T> {
+    const state: AsyncState<T> = {
+        state: "none",
+        data: undefined,
+        errorMessage: undefined,
+        refetch: async () => {
+            state.state = "loading";
+            state.errorMessage = undefined;
+
+            render();
+
+            try {
+                state.data = await refetch();
+
+                state.state = "loaded";
+            } catch(err) {
+                state.state = "failed";
+
+                state.errorMessage = `${err}`;
+                if (state.errorMessage === "[object Object]") {
+                    state.errorMessage = "An error occured";
+                }
+            } finally {
+                render();
+            }
+        }
+    };
+
+    return state;
+}
+
+export type AsyncState<T> = {
+    state: "none" | "loading" |  "loaded" | "failed";
+    errorMessage: string | undefined;
+    data: T | undefined;
+    refetch: () => Promise<void>;
+}
+
+export async function renderAsync() {
+
+}

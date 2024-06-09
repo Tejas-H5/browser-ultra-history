@@ -1,5 +1,5 @@
 import { forEachMatch, } from "src/utils/re";
-import { Message, UrlInfo, UrlMetadata, recieveMessage, sendLog, } from "./message";
+import { UrlInfo, newUrlInfo, recieveMessage, saveOutgoingUrls, sendLog as sendLogImported } from "./state";
 
 declare global {
     interface Window {
@@ -7,23 +7,31 @@ declare global {
     }
 }
 
-
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded content main!")
 }
 
-recieveMessage((message, _sender, response) => {
-    function respond(message: Message | undefined) {
-        if (message) {
-            response(message);
-        }
+recieveMessage((message, _sender) => {
+    if (message.type ==="content_collect_urls") {
+        collectUrls();
     }
-
-    switch (message.type) {
-        case "collect_urls": return respond(getUrls());
-    }
-
 }, "content");
+
+
+async function collectUrls() {
+    const urls = getUrls();
+    if (!urls) {
+        return;
+    }
+
+    const tabUrl = window.location.href;
+    await saveOutgoingUrls(tabUrl, urls);
+}
+
+function sendLog(message: string) {
+    const tabUrl = window.location.href;
+    sendLogImported(tabUrl, message);
+}
 
 function getStyleName(inlineStyleAttributeText: string, startOfValue: number): string{ 
     const colonIdx = inlineStyleAttributeText.lastIndexOf(":", startOfValue);
@@ -43,16 +51,15 @@ function cssUrlRegex() {
     return /url\(["'](.*?)["']\)/g;
 }
 
-function getUrls(): Message | undefined {
+function getUrls(): UrlInfo[] | undefined {
     const root = document.querySelector("html");
     if (!root) {
         return undefined;
     }
 
-
-    const tabUrl = window.location.href;
     const urls: UrlInfo[] = [];
-    const pushUrl = (url: string, metadata: UrlMetadata) => {
+    const pushUrl = (urlInfo: UrlInfo) => {
+        let url = urlInfo.url;
         url = url.trim();
         if (
             !url ||
@@ -62,22 +69,21 @@ function getUrls(): Message | undefined {
             return;
         }
 
-        urls.push({
-            url, 
-            urlCollectedFrom: tabUrl,
-            visitedAt: new Date().toISOString(),
-            metadata,
-        });
+        urlInfo.url = url;
+ 
+        urls.push(urlInfo);
     }
 
-    pushUrl(tabUrl, { source: "directly-visited" });
-
-    sendLog(tabUrl, "started collection");
+    sendLog("started collection");
 
     function pushAllOfAttr(tag: string, attr: string) {
         for (const el of document.getElementsByTagName(tag)) {
-            // @ts-expect-error trust me bro
-            pushUrl(el[attr], { source: "attribute", attrName: attr });
+            const url = el.getAttribute(attr);
+            if (!url) {
+                continue;
+            }
+
+            pushUrl(newUrlInfo({ url, attrName: attr }));
         }
     }
 
@@ -85,7 +91,7 @@ function getUrls(): Message | undefined {
     pushAllOfAttr("link", "href");
     pushAllOfAttr("img", "src");
 
-    sendLog(tabUrl, "collected from attributes");
+    sendLog("collected from attributes");
 
     // elements with inline styles
     for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
@@ -97,11 +103,9 @@ function getUrls(): Message | undefined {
 
             forEachMatch(val, cssUrlRegex(), (matches) => {
                 const url = matches[1];
-                if (styleName === "cssText") {
-                    sendLog(tabUrl, matches.join(", "));
-                }
-
-                pushUrl(url, { source: "style", styleName });
+                pushUrl(newUrlInfo({ 
+                    url,
+                }));
             });
         }
     }
@@ -118,11 +122,11 @@ function getUrls(): Message | undefined {
             const url = matches[1]
 
             const styleName = getStyleName(val, start);
-            pushUrl(url, { source: "style", styleName });
+            pushUrl(newUrlInfo({ url, styleName }));
         });
     }
 
-    sendLog(tabUrl, "collected from styles");
+    sendLog("collected from styles");
 
     // all text
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -142,11 +146,11 @@ function getUrls(): Message | undefined {
             const suffix = start+CONTEXT < val.length ? "..." : "";
             const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
 
-            pushUrl(url, { source: "text", text:contextString }); 
+            pushUrl(newUrlInfo({ url, contextString })); 
         });
     }
 
-    sendLog(tabUrl, "collected from all text");
+    sendLog("collected from all text");
 
-    return { type: "urls", urls };
+    return urls;
 }

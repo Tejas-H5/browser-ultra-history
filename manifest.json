@@ -3,7 +3,7 @@
     "name": "Test",
     "version": "1.0",
     "description": "Tryin to make an extension",
-    "permissions": ["activeTab", "webNavigation","tabs", "storage", "unlimitedStorage"],
+    "permissions": ["activeTab", "webNavigation", "tabs", "storage", "unlimitedStorage"],
     "browser_action": {
         "default_icon": "icons/icon.png",
         "default_title": "test",

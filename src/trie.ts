@@ -43,11 +43,13 @@ export class Trie {
     // NOTE: this function is suboptimal. Count is something we should be keep track of incrementally in a better-designed data structure
     recomputeCountsRecursive() {
         let count = 0;
+        if (this.children.length === 0) {
+            count++;
+        }
+
         for (const c of this.children) {
             count += c.recomputeCountsRecursive();
         }
-
-        count += this.children.length;
 
         this._count = count;
 
