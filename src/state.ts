@@ -192,13 +192,25 @@ export function isUrlKey(key: string) {
 
 // an array with a list of urls that linked to this one
 export function getAdjOutgoingKey(url: string) {
-    return "#o:" + url;
+    return OUT_PREFIX + url;
 }
+
+export function isOutKey(key: string) {
+    return key.startsWith(OUT_PREFIX);
+}
+
+export const OUT_PREFIX = "#o:";
 
 // an array with a list of urls that this one links to
 export function getAdjIncmingKey(url: string) {
-    return "#t:" + url;
+    return IN_PREFIX + url;
 }
+
+export function isInKey(key: string) {
+    return key.startsWith(IN_PREFIX);
+}
+
+export const IN_PREFIX = "#i:";
 
 export function getLinkKey(fromUrl: string, toUrl: string) {
     return "#l:" + fromUrl + ">-->" + toUrl;
@@ -333,22 +345,31 @@ export async function collectUrlsFromActiveTab() {
     await sendMessageToTabs({ type: "content_collect_urls" }, [activeTab]);
 }
 
-export async function getCurrentLocationData(windowLocationHref: string): Promise<CurrentLocationData> {
-    console.log("getting data for ", windowLocationHref);
+type AllData = Record<string, any>;
 
+function getCurrentLocationDataKeys(windowLocationHref: string) {
     const urlKey = getUrlKey(windowLocationHref);
-    const metadata = await getUrlInfo(urlKey);
-
     const incomingKey = getAdjIncmingKey(windowLocationHref);
     const outgoingKey = getAdjOutgoingKey(windowLocationHref);
 
-    const data = await defaultStorageArea.get([incomingKey, outgoingKey]);
+    return { urlKey, incomingKey, outgoingKey };
+}
 
+export function getCurrentLocationDataFromAllData(windowLocationHref: string, data: AllData): CurrentLocationData{
+    const keys = getCurrentLocationDataKeys(windowLocationHref);
     return {
-        metadata,
-        incoming: data[incomingKey] || [] as string[],
-        outgoing: data[outgoingKey] || [] as string[],
+        metadata: data[keys.urlKey] as UrlInfo,
+        incoming: data[keys.incomingKey] || [] as string[],
+        outgoing: data[keys.outgoingKey] || [] as string[],
     };
+}
+
+export async function getCurrentLocationData(windowLocationHref: string): Promise<CurrentLocationData> {
+    console.log("getting data for ", windowLocationHref);
+    const keys = getCurrentLocationDataKeys(windowLocationHref);
+    const data = await defaultStorageArea.get(Object.values(keys));
+
+    return getCurrentLocationDataFromAllData(windowLocationHref, data);
 }
 
 export type CurrentLocationData = {

@@ -1,8 +1,8 @@
-import { divStyled, newComponent, newRenderGroup } from "./utils/dom-utils";
+import { div, newComponent, newRenderGroup } from "./utils/dom-utils";
 
 export function NetworkGraph() {
     const rg = newRenderGroup();
-    const root = divStyled("flex-1 p-5 align-items-center justify-content-center", "", [
+    const root = div({ class: "flex-1 p-5 flex-center" }, [
         rg.text(() => "Network graph - TODO")
     ]);
 

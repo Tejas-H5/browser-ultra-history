@@ -1,4 +1,4 @@
-import { div, divStyled, init, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import { div, init, newComponent, newRenderGroup } from 'src/utils/dom-utils';
 import { makeButton } from './components';
 import { openExtensionTab } from './open-pages';
 import { clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getStateJSON, loadStateJSON } from './state';
@@ -34,11 +34,11 @@ export function TopBar(isMain: boolean) {
         ]),
 
 
-        divStyled("flex-1", ""),
+        div({ class: "flex-1" }),
 
         // rg.text(() => "" + count + " urls collected"),
 
-        divStyled("flex-1", ""),
+        div({ class: "flex-1" }),
 
         ...(!isMain ? [
             init(makeButton("Open Extension Tab"), (button) => {

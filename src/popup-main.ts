@@ -1,5 +1,5 @@
-import { div, initSPA, newComponent, newRenderGroup } from 'src/utils/dom-utils';
-import { getTheme, onStateChange, setTheme } from './state';
+import { div, initSPA, newRefetcher, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import { CurrentLocationData, getCurrentLocationData, getCurrentTabUrl, getTheme, onStateChange, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
 
@@ -13,18 +13,67 @@ function PopupAppRoot() {
     const rg = newRenderGroup();
 
     const appRoot = div({
-        class: "fixed col", 
+        class: "fixed col",
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
         rg.component(TopBar(false)),
-        rg.component(UrlExplorer()),
-    ])
+        div({ class: "flex-1 col" }, [
+            rg.if(() => fetchState.state === "failed", div({ class: "flex-1 col flex-center" }, [
+                "Loading failed: ",
+                rg.text(() => fetchState.errorMessage || "An unknown error occured"),
+            ])),
+            rg.if(() => fetchState.state !== "failed", rg.componentArgs(UrlExplorer(), () => {
+                if (!data) {
+                    return;
+                }
 
-    const component = newComponent(appRoot, render);
+                function onPushPathItem(key: string) {
 
-    async function render() {
-        await rg.render();
+                }
+
+                return {
+                    data,
+                    loading: fetchState.state === "loading",
+                    currentPath: [],
+                    onPushPathItem: onPushPathItem
+                };
+            })),
+        ]),
+    ]);
+
+    let data: CurrentLocationData | undefined;
+
+    const fetchState = newRefetcher(render, async () => {
+        const currentTabUrl = await getCurrentTabUrl();
+        if (!currentTabUrl) {
+            throw new Error("Couldn't find current tab!");
+        }
+
+        data = await getCurrentLocationData(currentTabUrl);
+        if (!data) {
+            throw new Error("No data collected yet for this location!");
+        }
+    });
+
+    function render() {
+        rg.render();
     }
+
+    async function renderAsync() {
+        if (asyncStateInvalidated) {
+            asyncStateInvalidated = false;
+
+            await fetchState.refetch();
+
+            if (fetchState.state !== "loaded") {
+                asyncStateInvalidated = true;
+            }
+        }
+
+        render();
+    }
+
+    const component = newComponent(appRoot, () => renderAsync());
 
     return component;
 }
@@ -37,14 +86,16 @@ const body = document.querySelector("body")!;
 body.style.width = "800px";
 body.style.height = "600px";
 
-async function rerenderApp() {
-    await app.render(app.args);
+function rerenderApp() {
+    app.render(undefined);
 }
 
 let stateChangeDebounceTimout = 0;
+let asyncStateInvalidated = true;
 onStateChange(() => {
     clearTimeout(stateChangeDebounceTimout);
     stateChangeDebounceTimout = setTimeout(() => {
+        asyncStateInvalidated = true;
         rerenderApp();
     }, 1000);
 });

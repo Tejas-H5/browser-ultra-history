@@ -13,14 +13,10 @@
     background-color: var(--fg-color);
 }
 
-.unfocused-text-color {
-    color: var(--unfocus-text-color);
-}
+.unfocused-text-color { color: var(--unfocus-text-color); }
 
-.bg-color-focus {
-    background-color: var(--bg-color-focus);
-}
-
+.bg-color-focus { background-color: var(--bg-color-focus); }
+.hover:hover { background-color: var(--bg-color-focus); }
 .danger {
     background-color: red;
     color: white;
@@ -37,42 +33,18 @@
     border-radius: 6px;
 }
 
-.sb1l {
-    border-left: 1px solid var(--fg-color);
-}
-
-.sb1r {
-    border-right: 1px solid var(--fg-color);
-}
-
-.sb1t {
-    border-top: 1px solid var(--fg-color);
-}
-
-.sb1b {
-    border-bottom: 1px solid var(--fg-color);
-}
-
-.solid-border-sm {
-    border: 1px solid var(--fg-color);
-}
-
-.solid-border-sm-rounded {
-    border: 1px solid var(--fg-color);
-    border-radius: 3px;
-}
-
+.sb1l { border-left: 1px solid var(--fg-color); }
+.sb1r { border-right: 1px solid var(--fg-color); }
+.sb1t { border-top: 1px solid var(--fg-color); }
+.sb1b { border-bottom: 1px solid var(--fg-color); }
+.solid-border-sm { border: 1px solid var(--fg-color); }
+.solid-border-sm-rounded { border: 1px solid var(--fg-color); border-radius: 3px; }
 
 /** error handling and debugging */
 
-.catastrophic---error>* {
-    display: none;
-}
-
+.catastrophic---error>* { display: none; }
 .catastrophic---error::before {
     content: "An error occured when updating this content. You've found a bug!";
 }
 
-.debug {
-    border: 1px solid red;
-}
+.debug { border: 1px solid red; }

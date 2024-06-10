@@ -15,6 +15,7 @@
 
 .align-items-center { align-items: center; }
 .justify-content-center { justify-content: center; }
+.flex-center{ align-items: center; justify-content: center; }
 .justify-content-end { justify-content: end; }
 .align-items-end { align-items: flex-end; }
 .align-items-start { align-items: flex-start; }
@@ -46,6 +47,8 @@
 .text-align-left { text-align: left; }
 .pre-wrap { white-space: pre-wrap; }
 .pre { white-space: pre; }
+.b { font-weight: bold; }
+.i { font-style: italic; }
 .handle-long-words {
     overflow-wrap: anywhere;
     word-break: normal;
@@ -54,6 +57,11 @@
     text-decoration: line-through;
     text-decoration-color: var(--fg-color);
 }
+.underline {
+    text-decoration: underline;
+    text-decoration-color: var(--fg-color);
+}
+.pointer:hover { cursor: pointer; }
 
 /** common spacings */
 

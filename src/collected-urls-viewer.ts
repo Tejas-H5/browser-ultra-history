@@ -1,12 +1,12 @@
-import { UrlInfo, getAllData, isUrlKey } from "./state";
-import { div, divStyled, newAsyncState, newComponent, newListRenderer, newRenderGroup } from "./utils/dom-utils";
+import { UrlInfo, isUrlKey } from "./state";
+import { div, newComponent, newRenderGroup } from "./utils/dom-utils";
 
 function UrlItem() {
     const rg = newRenderGroup();
-    const root = divStyled("", "", [
-        rg.text(() => "URL: " + c.args.info?.url || "??"),
+    const root = div({}, [
+        rg.text(() => "URL: " + c.args?.info?.url || "??"),
         rg.text(() => ", "),
-        rg.text(() => "VisitedAt: " + new Date(c.args.info?.visitedAt || 0).toLocaleDateString()),
+        rg.text(() => "VisitedAt: " + new Date(c.args?.info?.visitedAt || 0).toLocaleDateString()),
     ]);
 
     const c = newComponent<{info: UrlInfo | undefined}>(root, rg.render);
@@ -15,48 +15,26 @@ function UrlItem() {
 
 export function CollectedUrlsViewer() {
     const rg = newRenderGroup();
-    const root = divStyled("flex-1 p-5 align-items-center justify-content-center", "", [
-        rg.if(() => state.state === "loading", div({}, [ "Loading all the data..." ])),
-        rg.if(() => state.state === "failed", div({}, [
-            "Loading failed: ",
-            rg.text(() => state.errorMessage ?? "An error occured"),
-        ])),
-        rg.if(() => state.state === "loaded", rg(
-            newListRenderer(div(), UrlItem), 
-            (list) => {
-                const data = state.data;
-                if (!data) {
-                    return;
-                }
-
-                for (const k in data) {
-                    if (!isUrlKey(k)) {
-                        continue;
-                    }
-
-                    list.getNext().render({
-                        info: data[k] as UrlInfo | undefined
-                    });
-                }
+    const root = div({ class: "flex-1 p-5 flex-center" }, [
+        rg.list(div(), UrlItem, (getNext) => {
+            const data = c.args?.allData;
+            if (!data) {
+                return;
             }
-        )),
+
+            for (const k in data) {
+                if (!isUrlKey(k)) {
+                    continue;
+                }
+
+                getNext().render({
+                    info: data[k] as UrlInfo | undefined
+                });
+            }
+        })
     ]);
 
-    const c = newComponent(root, () => renderAsync());
-
-    const state = newAsyncState<any>(render, async () => {
-        const data = await getAllData();
-        console.log({ data });
-        return data;
-    });
-
-    function render() {
-        rg.render();
-    }
-
-    async function renderAsync() {
-        await state.refetch();
-    }
+    const c = newComponent<{ allData: any }>(root, rg.render);
 
     return c;
 }

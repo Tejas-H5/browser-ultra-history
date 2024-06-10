@@ -1,12 +1,17 @@
 import { Insertable, div, newComponent, on, scrollIntoViewV } from "src/utils/dom-utils";
 
 export function ScrollContainerV() {
+    type Args = {
+        rescrollMs?: number; 
+        scrollEl: Insertable | null;
+    };
+
     const scrollContainer = div({ class: "flex-1", style: "overflow-y: auto;" });
 
     let scrollTimeout = 0;
     let lastScrollEl : Insertable | null | undefined = undefined;
     let lastHeight = 0;
-    const component = newComponent<{ rescrollMs?: number, scrollEl: Insertable | null }>(scrollContainer, renderScrollContainer);
+    const component = newComponent<Args>(scrollContainer, renderScrollContainer);
 
     function scrollToLastElement() {
         clearTimeout(scrollTimeout);

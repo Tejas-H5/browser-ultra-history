@@ -120,9 +120,8 @@ export function isVisible(component: Renderable | Insertable): boolean {
 type ComponentPool<T extends Insertable> = {
     components: T[];
     lastIdx: number;
-    getNext(): T;
     getIdx(): number;
-    render(renderFn: () => void | Promise<void>, noErrorBoundary?: boolean): void | Promise<void>;
+    render(renderFn: (getNext: () => T) => void, noErrorBoundary?: boolean): void;
 }
 
 type KeyedComponentPool<K, T extends Insertable> = {
@@ -255,14 +254,9 @@ export function div(attrs?: Attrs, children?: ChildList) {
     return el<HTMLDivElement>("DIV", attrs, children);
 }
 
-export function divClass(className: string, children?: ChildList) {
-    return div({ class: className }, children);
+export function divClass(className: string, attrs: Attrs = {}, children?: ChildList) {
+    return setAttrs(div(attrs, children), { class: className }, true);
 }
-
-export function divStyled(className: string, style: string, children?: ChildList) {
-    return div({ class: className, style: style }, children);
-}
-
 
 // NOTE: function might be removed later
 export function setErrorClass(root: Insertable, state: boolean) {
@@ -290,45 +284,53 @@ export type ComponentList<T extends Insertable> = Insertable & ComponentPool<T>;
 export type KeyedComponentList<K, T extends Insertable> = Insertable & KeyedComponentPool<K, T>;
 
 export function newListRenderer<T extends Insertable>(root: Insertable, createFn: () => T): ComponentList<T> {
-    return {
-        ...root,
+    function getNext() {
+        if (renderer.lastIdx > renderer.components.length) {
+            throw new Error("Something strange happened when resizing the component pool");
+        }
+
+        if (renderer.lastIdx === renderer.components.length) {
+            const component = createFn();
+            renderer.components.push(component);
+            appendChild(root, component);
+        }
+
+        return renderer.components[renderer.lastIdx++];
+    }
+
+    let renderFn: ((getNext: () => T) => void)  | undefined;
+    function renderFnBinded() {
+        renderFn?.(getNext);
+    }
+
+    const renderer: ComponentList<T> = {
+        el: root.el,
+        _isInserted: root._isInserted,
         components: [],
         lastIdx: 0,
         getIdx() {
             // (We want to get the index of the current iteration, not the literal value of lastIdx)
             return this.lastIdx - 1;
         },
-        getNext() {
-            if (this.lastIdx > this.components.length) {
-                throw new Error("Something strange happened when resizing the component pool");
-            }
-
-            if (this.lastIdx === this.components.length) {
-                const component = createFn();
-                this.components.push(component);
-                appendChild(root, component);
-            }
-
-            return this.components[this.lastIdx++];
-        },
-        render(renderFn, noErrorBoundary = false) {
+        render(renderFnIn, noErrorBoundary = false) {
             this.lastIdx = 0;
 
-            let res;
+            renderFn = renderFnIn;
+
             if (noErrorBoundary) {
-                res = renderFn();
+                renderFnBinded();
             } else {
-                res = handleRenderingError(this, renderFn);
+                handleRenderingError(this, renderFnBinded);
             }
 
             while(this.components.length > this.lastIdx) {
                 const component = this.components.pop()!;
                 component.el.remove();
             } 
-
-            return res;
         },
-    }
+    };
+
+    return renderer;
 }
 
 /** 
@@ -486,20 +488,30 @@ export function setInputValue(component: InsertableInput, text: string) {
  * component re-renders.
  *
  */
-export function newComponent<T = undefined>(root: Insertable, renderFn: () => void | Promise<void>) {
+export function newComponent<T = undefined>(root: Insertable, renderFn: () => void) {
     // We may be wrapping another component, i.e reusing it's root. So we should just do this
     root._isInserted = true;
+    let args: T | null = null;
     const component : Renderable<T> = {
         ...root,
         _isInserted: false,
-        // @ts-ignore this is always set before we render the component
-        args: null,
+        get argsOrNull() {
+            return args;
+        },
+        get args() {
+            if (args === null) {
+                throw new Error("Args will always be null before a component is rendered for the first time!");
+            }
+
+            return args;
+        },
         render(argsIn, noErrorBoundary = false) {
             if (!this._isInserted) {
                 console.warn("A component hasn't been inserted into the DOM, but it's being rendered anyway");
             }
 
-            component.args = argsIn;
+            args = argsIn;
+
             if (noErrorBoundary) {
                 return renderFn();
             } else {
@@ -512,17 +524,17 @@ export function newComponent<T = undefined>(root: Insertable, renderFn: () => vo
 }
 
 export function newRenderGroup() {
-    const updateFns: (() => Promise<void>)[] =  [];
+    const updateFns: (() => void)[] =  [];
 
-    const push = <T extends Insertable | Insertable<Text>>(el: T, updateFn: (el: T) => any | Promise<any>): T  => {
+    const push = <T extends Insertable | Insertable<Text>>(el: T, updateFn: (el: T) => any): T  => {
         updateFns.push(() => updateFn(el));
         return el;
     }
 
     return Object.assign(push, {
-        async render () {
+        render () {
             for (const fn of updateFns) {
-               await fn();
+               fn();
             }
         },
         text: (fn: () => string): Insertable<Text> => {
@@ -531,8 +543,17 @@ export function newRenderGroup() {
         component: (renderable: Renderable<undefined>) => {
             return push(renderable, (r) => r.render(undefined));
         },
-        componentArgs: <T>(renderable: Renderable<T>, argsFn: () => T) => {
-            return push(renderable, (r) => r.render(argsFn()));
+        /** NOTE: only renders the component if argsFn isn't undefined */
+        componentArgs: <T>(renderable: Renderable<T>, argsFn: () => T | undefined) => {
+            return push(renderable, (r) => {
+                const args = argsFn();
+                if (args !== undefined) {
+                    r.render(args);
+                }
+            });
+        },
+        list: <T extends Insertable>(root: Insertable, Component: () => T, renderFn: (getNext: () => T) => void) => {
+            return push(newListRenderer(root, Component), (list) => list.render(renderFn));
         },
         if: (fn: () => boolean, ins: Insertable) => {
             return push(ins, (r) => setVisible(r, fn()));
@@ -547,10 +568,50 @@ function text(str: string): Insertable<Text> {
     };
 }
 
-
 export type Renderable<T = undefined> = Insertable & {
+    /**
+     * A renderable's arguments will be null until during or after the first render
+     * .args is actually a getter that will throw an error if accessed before then.
+     *
+     * ```
+     *
+     * function Component() {
+     *      type Args = { count: number; }
+     *      const rg = newRenderGroup();
+     *      const div2 = div();
+     *
+     *      // this works, provider rg.render is only called during or after the first render
+     *      const button = el("button", {}, ["Clicked ", rg.text(() => c.args.count), " time(s)"]);
+     *
+     *      const root = div({}, [
+     *          button, 
+     *          div2,
+     *      ]);
+     *
+     *      // Runtime error: Args were null!
+     *      setText(div2, "" + c.args.count);   
+     *
+     *      const c = newComponent<Args>(root, () => {
+     *          // this works, c.args being called during (at least) the first render.
+     *          const { count } = c.args;
+     *      });
+     *
+     *      on(button, "click", () => {
+     *          // this works, assuming the component is rendered immediately before the user is able to click the button in the first place.
+     *          const { count } = c.args;
+     *      });
+     *
+     *      document.on("keydown", () => {
+     *          // this will mostly work, but if a user is holding down keys before the site loads, this will error!
+     *          // You'll etiher have to use c.argsOrNull and check for null, or only add the handler once during the first render.
+     *          const { count } = c.args;
+     *      });
+     * }
+     * ```
+     */
     args: T;
-    render(args: T, noErrorBoundary?: boolean):void | Promise<void>;
+    argsOrNull: T | null;
+    render(args: T, noErrorBoundary?: boolean):void;
 }
 
 export function isEditingTextSomewhereInDocument(): boolean {
@@ -638,10 +699,11 @@ export function initSPA(rootQuerySelector: string, rootComponent: Renderable) {
     appendChild(root, rootComponent);
 }
 
-export function newAsyncState<T>(render: () => void, refetch: () => Promise<T>): AsyncState<T> {
-    const state: AsyncState<T> = {
+// A helper to manage asynchronous fetching of data that I've found quite useful.
+// I've found that storing the data directly on this object isn't ideal.
+export function newRefetcher(render: () => void, refetch: () => Promise<void>): AsyncState {
+    const state: AsyncState = {
         state: "none",
-        data: undefined,
         errorMessage: undefined,
         refetch: async () => {
             state.state = "loading";
@@ -650,7 +712,7 @@ export function newAsyncState<T>(render: () => void, refetch: () => Promise<T>):
             render();
 
             try {
-                state.data = await refetch();
+                await refetch();
 
                 state.state = "loaded";
             } catch(err) {
@@ -669,13 +731,8 @@ export function newAsyncState<T>(render: () => void, refetch: () => Promise<T>):
     return state;
 }
 
-export type AsyncState<T> = {
+export type AsyncState = {
     state: "none" | "loading" |  "loaded" | "failed";
     errorMessage: string | undefined;
-    data: T | undefined;
     refetch: () => Promise<void>;
-}
-
-export async function renderAsync() {
-
 }
