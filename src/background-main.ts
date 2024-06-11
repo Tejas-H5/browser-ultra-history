@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
-import { clearAllData, collectUrlsFromTabs, recieveMessage, saveOutgoingUrls } from "./state";
+import { clearAllData, collectUrlsFromTabs, recieveMessage, saveOutgoingLinks } from "./state";
 import { runAllTests } from "./tests";
 
 browser.runtime.onInstalled.addListener(() => {
@@ -32,16 +32,16 @@ async function onStart() {
             }
         }
 
-        browser.webNavigation.onCompleted.addListener((details) => {
-            console.log("recieved navigation event");
-            // const tabId = details.tabId;
-            // collectUrlsFromTabs([{ tabId }]);
-        });
+        // browser.webNavigation.onCompleted.addListener((details) => {
+        //     console.log("recieved navigation event");
+        //     // const tabId = details.tabId;
+        //     // collectUrlsFromTabs([{ tabId }]);
+        // });
 
-        browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
-            console.log("history updated");
-            // TODO: collect stuff??
-        });
+        // browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
+        //     console.log("history updated");
+        //     // TODO: collect stuff??
+        // });
 
     } catch (e) {
         console.error(e);
@@ -64,7 +64,7 @@ recieveMessage((message) => {
     }
 
     if(message.type === "save_urls") {
-        saveOutgoingUrls(message.currentTablUrl, message.outgoingUrlInfos);
+        saveOutgoingLinks(message.currentTablUrl, message.outgoingLinks);
         return;
     }
 });

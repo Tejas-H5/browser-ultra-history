@@ -16,11 +16,16 @@ export function TopBar(isMain: boolean) {
                 });
             })
         ),
-        init(makeButton("Collect all tabs"), (button) => {
-            button.el.addEventListener("click", async () => {
-                await collectUrlsFromTabs();
-                render();
-            });
+        isMain && (
+            init(makeButton("Collect all tabs"), (button) => {
+                button.el.addEventListener("click", async () => {
+                    await collectUrlsFromTabs();
+                    render();
+                });
+            })
+        ),
+        rg(makeButton(), (el) => {
+            // TODO:: enable/disable button
         }),
         ...(!isMain ? [] : [
             (

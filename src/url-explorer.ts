@@ -1,41 +1,75 @@
-import { CurrentLocationData } from "./state";
-import { div, divClass, newComponent, newRenderGroup, on, setClass } from "./utils/dom-utils";
+import { makeButton } from "./components";
+import { renderContext } from "./render-context";
+import { CurrentLocationData, LinkInfo, getCurrentLocationData, getCurrentTabUrl } from "./state";
+import { div, divClass, newComponent, newRefetcher, newRenderGroup, newStyleGenerator, on, setClass } from "./utils/dom-utils";
+
+const sg = newStyleGenerator();
+
+const cnAlreadyInPath = sg.makeClass("alreadyInPath", [
+    `{ color: #00F }`,
+]);
 
 function UrlList()  {
     type Args = {
-        urls: string[]; 
+        links: LinkInfo[]; 
+        currentUrlsPath: string[];
         isIncoming: boolean;
-        onClick: (key: string) => void;
+        onClick: (key: string, isIncoming: boolean) => void;
     };
 
     function UrlListItem() {
         type Args = {
-            url: string;
+            linkInfo: LinkInfo;
             isIncoming: boolean;
-            onClick(): void;
+            onClick(key: string, isIncoming: boolean): void;
+            isAlreadyInPath: boolean;
         };
 
         let isMouseOver = false;
 
+        function fmt(name: string, str: string[] | undefined) {
+            if (!str) {
+                return "";
+            }
+
+            return "[" + name + ":" + str.join(", ") + "]";
+        }
+
         const rg = newRenderGroup();
-        const root = divClass("hover-parent hover", {}, [
+        const root = divClass("hover-parent hover handle-long-words", {}, [
             rg.text(() => c.args.isIncoming && isMouseOver ? "<-- " : ""),
-            rg.text(() => c.args.url),
+
+            rg.text(() => fmt("Style", c.args.linkInfo.styleName)),
+            rg.text(() => fmt("Attribute", c.args.linkInfo.attrName)),
+            rg.text(() => fmt("Context", c.args.linkInfo.contextString)),
+            rg.text(() => fmt("Link text", c.args.linkInfo.linkText)),
+            rg.text(() => fmt("Image", c.args.linkInfo.linkImage)),
+
+            rg.text(() => c.args.linkInfo.url),
             rg.text(() => !c.args.isIncoming && isMouseOver ? " -->" : ""),
         ]);
 
         const c = newComponent<Args>(root, render);
 
+        function canClick() {
+            return !c.args.isAlreadyInPath;
+        }
+
         function render() {
             rg.render();
 
-            setClass(root, "pointer", isMouseOver);
-            setClass(root, "underline", isMouseOver);
+            setClass(root, cnAlreadyInPath, c.args.isAlreadyInPath);
+
+            setClass(root, "pointer", canClick() && isMouseOver);
+            setClass(root, "underline", canClick() && isMouseOver);
         }
 
         on(root, "click", () => {
-            const { onClick } = c.args;
-            onClick();
+            const { onClick, linkInfo, isIncoming } = c.args;
+
+            if (canClick()) {
+                onClick(linkInfo.url, isIncoming);
+            }
         });
 
         on(root, "mouseenter", () => {
@@ -51,17 +85,18 @@ function UrlList()  {
         return c;
     }
 
-    const scrollContainer = div({ class: "overflow-y-auto" });
+    const scrollContainer = div({ class: "nowrap overflow-y-auto" });
     const rg = newRenderGroup();
-    const root = divClass("flex-1 col debug", {}, [
+    const root = divClass("flex-1 overflow-x-auto col", {}, [
         rg.list(scrollContainer, UrlListItem, (getNext) => {
-            const { urls, isIncoming } = c.args;
+            const { links, isIncoming, currentUrlsPath } = c.args;
             
-            for (const url of urls) {
+            for (const linkInfo of links) {
                 getNext().render({
-                    url,
+                    linkInfo,
                     isIncoming,
-                    onClick: () => c.args.onClick(url),
+                    onClick: c.args.onClick,
+                    isAlreadyInPath: currentUrlsPath.includes(linkInfo.url),
                 });
             }
         }),
@@ -77,49 +112,123 @@ function UrlList()  {
 }
 
 export function UrlExplorer() {
-    type Args = { 
-        data: CurrentLocationData; 
-        currentPath: string[];
-        loading: boolean; 
-        onPushPathItem(key: string): void;
-    };
+    type Args = { onNavigate(url: string): void; };
 
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 col" }, [
         div({ class: "row justify-content-center sb1b" }, [
-            "TODO: current path"
+            rg.if(
+                () => currentTabUrlStack.length > 1, 
+                on(makeButton([rg.text(() => "<- (" + currentTabUrlStack.length + ")")]), "click", () => {
+                    if (currentTabUrlStack.length > 1) {
+                        popPath();
+                    }
+                })
+            ),
+            div({ class: "flex-1" }),
+            div({ class: "handle-long-words" }, [ rg.text(() => peekTabStack() || "Pick a url to go to") ]),
+            div({ class: "flex-1" }),
+            rg.if(
+                () => !!peekTabStack(), 
+                on(makeButton("Go"), "click", () => {
+                    if (peekTabStack()) {
+                        c.args.onNavigate(peekTabStack());
+                    }
+                })
+            ),
         ]),
-        div({ class: "b" }, [ rg.text(() => "Incoming: " + c.args.data.incoming.length) ]),
+        div({ class: "b" }, [ rg.text(() => "Incoming: " + (data?.incoming.length || 0)) ]),
         div({ class: "flex-1 col sb1b" }, [
             rg.componentArgs(UrlList(), () => {
-                console.log(c.args.data.incoming);
+                if (!data) return;
+
                 return {
-                    urls: c.args.data.incoming,
+                    links: data.incoming,
                     isIncoming: true,
                     onClick: pushPath,
+                    currentUrlsPath: currentTabUrlStack,
                 }
             })
         ]),
-        div({ class: "b" }, [ rg.text(() => "Outgoing: " + c.args.data.outgoing.length) ]),
-        div({ class: "flex-1 col sb1b" }, [
+        div({ class: "b" }, [ rg.text(() => "Outgoing: " + (data?.outgoing.length || 0)) ]),
+        div({ class: "col sb1b min-wh-0", style: "flex: 3" }, [
             rg.componentArgs(UrlList(), () => {
+                if (!data) return;
+
                 return {
-                    urls: c.args.data.outgoing,
+                    links: data.outgoing,
                     isIncoming: false,
                     onClick: pushPath,
+                    currentUrlsPath: currentTabUrlStack,
                 }
             })
         ]),
     ]);
 
-    const c = newComponent<Args>(root, render);
+    const c = newComponent<Args>(root, () => renderAsync());
+
+    let data: CurrentLocationData | undefined;
+    let currentTabUrlStack: string[] = [];
+    function peekTabStack() {
+        return currentTabUrlStack[currentTabUrlStack.length - 1];
+    }
+
+    const fetchState = newRefetcher(render, async (tabUrl: string | undefined) => {
+        let currentTabUrl = tabUrl;
+        if (!currentTabUrl) {
+            currentTabUrl = await getCurrentTabUrl();
+        }
+
+        if (!currentTabUrl) {
+            throw new Error("Couldn't find current tab!");
+        }
+
+        data = await getCurrentLocationData(currentTabUrl);
+        if (!data) {
+            throw new Error("No data collected yet for this location!");
+        }
+
+        data.incoming.sort((a, b) => a.url.localeCompare(b.url));
+        data.outgoing.sort((a, b) => a.url.localeCompare(b.url));
+    });
 
     function render() {
         rg.render();
     }
 
-    function pushPath(key: string) {
-        c.args.onPushPathItem(key);
+    async function renderAsync() {
+        if (renderContext.forceRefetch) {
+            currentTabUrlStack.splice(0, currentTabUrlStack.length)
+        }
+
+        if (
+            currentTabUrlStack.length !== 0
+        ) {
+            return;
+        }
+        
+        const currentTabUrl = await getCurrentTabUrl();
+        if (!currentTabUrl) {
+            return;
+        }
+
+        pushPath(currentTabUrl);
+    }
+
+    async function pushPath(url: string) {
+        if (peekTabStack() === url) {
+            return;
+        }
+
+        currentTabUrlStack.push(url);
+        await fetchState.refetch(url);
+    }
+
+    async function popPath() {
+        if (currentTabUrlStack.length > 1) {
+            currentTabUrlStack.pop();
+            await fetchState.refetch(peekTabStack());
+        }
     }
 
     return c;

@@ -1,7 +1,9 @@
-import { div, initSPA, newRefetcher, newComponent, newRenderGroup } from 'src/utils/dom-utils';
-import { CurrentLocationData, getCurrentLocationData, getCurrentTabUrl, getTheme, onStateChange, setTheme } from './state';
+import { div, initSPA, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import browser from "webextension-polyfill";
+import { getCurrentTab, getTheme, onStateChange, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
+import { renderContext } from './render-context';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -11,65 +13,34 @@ if (process.env.ENVIRONMENT === "dev") {
 // Also, it exists to navigate the 
 function PopupAppRoot() {
     const rg = newRenderGroup();
-
     const appRoot = div({
         class: "fixed col",
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
         rg.component(TopBar(false)),
         div({ class: "flex-1 col" }, [
-            rg.if(() => fetchState.state === "failed", div({ class: "flex-1 col flex-center" }, [
-                "Loading failed: ",
-                rg.text(() => fetchState.errorMessage || "An unknown error occured"),
-            ])),
-            rg.if(() => fetchState.state !== "failed", rg.componentArgs(UrlExplorer(), () => {
-                if (!data) {
-                    return;
-                }
-
-                function onPushPathItem(key: string) {
-
-                }
-
-                return {
-                    data,
-                    loading: fetchState.state === "loading",
-                    currentPath: [],
-                    onPushPathItem: onPushPathItem
-                };
-            })),
+            rg.componentArgs(UrlExplorer(), () => {
+                return { onNavigate }
+            }),
         ]),
     ]);
 
-    let data: CurrentLocationData | undefined;
-
-    const fetchState = newRefetcher(render, async () => {
-        const currentTabUrl = await getCurrentTabUrl();
-        if (!currentTabUrl) {
-            throw new Error("Couldn't find current tab!");
+    async function onNavigate(url: string) {
+        const currentTab = await getCurrentTab();
+        if (!currentTab) {
+            return;
         }
 
-        data = await getCurrentLocationData(currentTabUrl);
-        if (!data) {
-            throw new Error("No data collected yet for this location!");
-        }
-    });
+        browser.tabs.update(currentTab.id, {
+            url: url,
+        });
+    }
 
     function render() {
         rg.render();
     }
 
     async function renderAsync() {
-        if (asyncStateInvalidated) {
-            asyncStateInvalidated = false;
-
-            await fetchState.refetch();
-
-            if (fetchState.state !== "loaded") {
-                asyncStateInvalidated = true;
-            }
-        }
-
         render();
     }
 
@@ -86,17 +57,17 @@ const body = document.querySelector("body")!;
 body.style.width = "800px";
 body.style.height = "600px";
 
-function rerenderApp() {
+function rerenderApp(forceRefetch = false) {
+    renderContext.forceRefetch = forceRefetch;
     app.render(undefined);
 }
 
 let stateChangeDebounceTimout = 0;
-let asyncStateInvalidated = true;
+
 onStateChange(() => {
     clearTimeout(stateChangeDebounceTimout);
     stateChangeDebounceTimout = setTimeout(() => {
-        asyncStateInvalidated = true;
-        rerenderApp();
+        rerenderApp(true);
     }, 1000);
 });
 

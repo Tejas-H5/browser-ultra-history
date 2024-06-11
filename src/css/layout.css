@@ -7,8 +7,13 @@
 
 .flex-1 {
     flex: 1;
-
     /** This right here is the secret sauce. Now the flex containers won't keep overflowing lmao */
+    min-width: 0;
+    min-height: 0;
+}
+
+.min-wh-0 {
+    /** Can be used to prevent flex-n contains from overflowing, as above */
     min-width: 0;
     min-height: 0;
 }
@@ -46,6 +51,7 @@
 .text-align-right { text-align: right; }
 .text-align-left { text-align: left; }
 .pre-wrap { white-space: pre-wrap; }
+.nowrap { text-wrap: nowrap; }
 .pre { white-space: pre; }
 .b { font-weight: bold; }
 .i { font-style: italic; }

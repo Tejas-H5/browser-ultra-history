@@ -45,10 +45,13 @@ export type Message = {
     tabIds?: TabId[];
 } | {
     type: "content_collect_urls"
-}| {
+} | {
+    type: "save_urls_finished",
+    numNewUrls: number;
+} | {
     type: "save_urls";
     currentTablUrl: string; 
-    outgoingUrlInfos: UrlInfo[];
+    outgoingLinks: UrlInfo[];
 };
 
 export function sendMessage(message: Message) {
@@ -233,22 +236,32 @@ export async function setLinkMetadata(urlFrom: string, urlTo: string, metadata: 
 }
 
 // TODO: compress these keys somehow, maybe just as arrays, before saving the JSON.
-export type UrlInfo = {
+export type LinkInfo = {
     url: string;
     visitedAt: string;
 
     // add new props as optionals below
 
-    styleName?: string;
-    attrName?: string;
-    contextString?: string;
+    styleName?: string[];
+    attrName?: string[];
+    contextString?: string[];
+    linkText?: string[];
+    linkImage?: string[];
 };
 
-export type LinkInfo = {
+export type UrlInfo = {
+    url: string;
     visitedAt: string;
 }
 
 export function newUrlInfo(info: Omit<UrlInfo, "visitedAt">, visitedAt = new Date()): UrlInfo {
+    return {
+        ...info,
+        visitedAt: visitedAt.toISOString(),
+    };
+}
+
+export function newLinkInfo(info: Omit<LinkInfo, "visitedAt">, visitedAt = new Date()): LinkInfo {
     return {
         ...info,
         visitedAt: visitedAt.toISOString(),
@@ -260,7 +273,7 @@ export async function getUrlsFrom(adjKey: string): Promise<string[]> {
     return data[adjKey] || [];
 }
 
-function mergeAdjacencies(existing: string[], incoming: string[]): void {
+function mergeAdjacencies(existing: string[], incoming: string[]) {
     for (const incomingUrl of incoming) {
         if (existing.indexOf(incomingUrl) !== -1) {
             continue;
@@ -268,65 +281,120 @@ function mergeAdjacencies(existing: string[], incoming: string[]): void {
 
         existing.push(incomingUrl);
     }
+
+    return existing;
 }
 
-export async function saveUrlInfo(info: UrlInfo): Promise<void>{
+export async function saveUrlInfo(info: UrlInfo): Promise<boolean> {
     const urlKey = getUrlKey(info.url);
     const existing = await getUrlInfo(urlKey);
     if (!existing) {
         await defaultStorageArea.set({ [urlKey]: info});
-        return;
+        return true;
     }
 
     // TODO: add merging logic here when needed.
+    return false;
 }
 
-export async function saveOutgoingUrls(currentTablUrl: string, outgoingUrlInfos: UrlInfo[]) {
-    // Make sure this happens on the background script, to reduce the chances of the script terminating early
-    if (process.env.SCRIPT !== "background-main") {
-        sendMessage({ type: "save_urls", currentTablUrl, outgoingUrlInfos });
+function mergeArrays<T>(a: undefined | T[], b: undefined | T[]) {
+    if(!a && !b) {
+        return undefined;
+    }
+
+    if (!a) {
+        return b;
+    }
+
+    if (!b) {
+        return a;
+    }
+
+    for (const el of b) {
+        if (!a.includes(el)) {
+            a.push(el);
+        }
+    }
+
+    return a;
+}
+
+export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
+    const linkKey = getLinkKey(urlFrom, linkInfo.url);
+    const existing = await getLinkInfo(urlFrom, linkKey);
+    if (!existing) {
+        await defaultStorageArea.set({ [linkKey]: linkInfo });
         return;
     }
+
+    existing.styleName = mergeArrays(existing.styleName, linkInfo.styleName);
+    existing.attrName = mergeArrays(existing.attrName, linkInfo.attrName);
+    existing.contextString = mergeArrays(existing.contextString, linkInfo.contextString);
+    existing.linkText = mergeArrays(existing.linkText, linkInfo.linkText);
+    existing.linkImage = mergeArrays(existing.linkImage, linkInfo.linkImage);
+
+    await defaultStorageArea.set({ [linkKey]: existing });
+}
+
+export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: LinkInfo[]) {
+    // Make sure this happens on the background script, to reduce the chances of the script terminating early
+    if (process.env.SCRIPT !== "background-main") {
+        sendMessage({ type: "save_urls", currentTablUrl, outgoingLinks });
+        return;
+    }
+
+    let numNewUrls = 0;
 
     // save the url infos
     {
         await saveUrlInfo(newUrlInfo({ url: currentTablUrl }));
-
-        for (const url of outgoingUrlInfos) {
-            await saveUrlInfo(url);
+        for (const link of outgoingLinks) {
+            const isNew = await saveUrlInfo(newUrlInfo({ url: link.url }));
+            if (isNew) {
+                numNewUrls += 1;
+            }
         }
     }
 
-    // save the links between the urls
+    // save the link metadata
     {
-        const urlOutKey = getAdjOutgoingKey(currentTablUrl);
-        const urlOutgoing = await getUrlsFrom(urlOutKey);
-        const newOutgoingUrls: string[] = outgoingUrlInfos.map(info => info.url);
+        for (const link of outgoingLinks) {
+            await saveLinkInfo(currentTablUrl, link);
+        }
+    }
 
-        mergeAdjacencies(urlOutgoing, newOutgoingUrls);
+    // save the adjacency info we can use to find incoming and outgoing links for a particular url
+    {
+        const urlOutLinksKey = getAdjOutgoingKey(currentTablUrl);
+        const urlOutLinks = await getUrlsFrom(urlOutLinksKey);
+        const urlOutLinksNew: string[] = outgoingLinks.map(info => info.url);
 
-        const payload: Record<string, string[]> = {
-            [urlOutKey]: urlOutgoing,
+        const mergedAdj = mergeAdjacencies(urlOutLinks, urlOutLinksNew);
+
+        const savePayload: Record<string, string[]> = {
+            [urlOutLinksKey]: mergedAdj,
         };
 
-        for (const newOutgoingUrl of newOutgoingUrls) {
+        for (const newOutgoingUrl of urlOutLinksNew) {
             const newOutgoingIncomingKey = getAdjIncmingKey(newOutgoingUrl);
             const newOutgoingIncoming = await getUrlsFrom(newOutgoingIncomingKey);
 
-            mergeAdjacencies(newOutgoingIncoming, [ currentTablUrl ]);
+            const mergedAdj = mergeAdjacencies(newOutgoingIncoming, [ currentTablUrl ]);
 
-            payload[newOutgoingIncomingKey] = newOutgoingIncoming;
+            savePayload[newOutgoingIncomingKey] = mergedAdj;
         }
 
-        await defaultStorageArea.set(payload);
+        await defaultStorageArea.set(savePayload);
     }
+
+    sendMessageToTabs({ type: "save_urls_finished", numNewUrls  });
 }
 
 export async function collectUrlsFromTabs() {
     await sendMessageToTabs({ type: "content_collect_urls" });
 }
 
-async function getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
+export async function getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
     const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
     return tabs[0];
 }
@@ -345,8 +413,6 @@ export async function collectUrlsFromActiveTab() {
     await sendMessageToTabs({ type: "content_collect_urls" }, [activeTab]);
 }
 
-type AllData = Record<string, any>;
-
 function getCurrentLocationDataKeys(windowLocationHref: string) {
     const urlKey = getUrlKey(windowLocationHref);
     const incomingKey = getAdjIncmingKey(windowLocationHref);
@@ -355,26 +421,30 @@ function getCurrentLocationDataKeys(windowLocationHref: string) {
     return { urlKey, incomingKey, outgoingKey };
 }
 
-export function getCurrentLocationDataFromAllData(windowLocationHref: string, data: AllData): CurrentLocationData{
-    const keys = getCurrentLocationDataKeys(windowLocationHref);
-    return {
-        metadata: data[keys.urlKey] as UrlInfo,
-        incoming: data[keys.incomingKey] || [] as string[],
-        outgoing: data[keys.outgoingKey] || [] as string[],
-    };
-}
-
 export async function getCurrentLocationData(windowLocationHref: string): Promise<CurrentLocationData> {
-    console.log("getting data for ", windowLocationHref);
     const keys = getCurrentLocationDataKeys(windowLocationHref);
     const data = await defaultStorageArea.get(Object.values(keys));
 
-    return getCurrentLocationDataFromAllData(windowLocationHref, data);
+    const metadata: UrlInfo = data[keys.urlKey];
+    const incoming: string[] = data[keys.incomingKey] || [];
+    const outgoing: string[] = data[keys.outgoingKey] || [];
+    
+    const adjKeysIn = incoming.map(inUrl => getLinkKey(inUrl, windowLocationHref));
+    const adjKeysInData: Record<string, LinkInfo> = await defaultStorageArea.get(adjKeysIn);
+
+    const adjKeysOut = outgoing.map(outUrl => getLinkKey(windowLocationHref, outUrl));
+    const adjKeysOutData: Record<string, LinkInfo> = await defaultStorageArea.get(adjKeysOut);
+
+    return {
+        metadata,
+        incoming: Object.values(adjKeysInData),
+        outgoing: Object.values(adjKeysOutData),
+    }
 }
 
 export type CurrentLocationData = {
-    incoming: string[];
-    outgoing: string[];
+    incoming: LinkInfo[];
+    outgoing: LinkInfo[];
     metadata: UrlInfo | undefined;
 }
 

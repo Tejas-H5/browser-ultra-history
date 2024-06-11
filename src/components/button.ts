@@ -1,6 +1,6 @@
-import { el } from "src/utils/dom-utils";
+import { ChildList, el } from "src/utils/dom-utils";
 
-export function makeButton(text: string, classes: string = "", styles: string = "") {
+export function makeButton(children: ChildList, classes: string = "", styles: string = "") {
     return el(
         "BUTTON",
         {
@@ -8,6 +8,6 @@ export function makeButton(text: string, classes: string = "", styles: string = 
             class: `solid-border ${classes} flex`,
             style: `min-width: 25px; padding: 3px; margin: 5px; justify-content: center; ${styles}`,
         },
-        [text]
+        children
     );
 }

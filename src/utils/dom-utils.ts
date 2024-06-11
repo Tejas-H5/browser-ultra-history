@@ -195,6 +195,9 @@ export function setAttrs<T extends Insertable>(
 export function addChildren<T extends Insertable>(ins: T, children: ChildList): T {
     const element = ins.el;
 
+    if (typeof children === "string") {
+        children = [children];
+    }
 
     for (const c of children) {
         if (c === false) {
@@ -244,7 +247,7 @@ export function el<T extends HTMLElement>(
     return insertable;
 }
 
-export type ChildList = (Insertable | Insertable<Text> | string | Insertable[] | false)[];
+export type ChildList = string | (Insertable | Insertable<Text> | string | Insertable[] | false)[];
 
 /**
  * Creates a div, gives it some attributes, and then appends some children. 
@@ -701,18 +704,18 @@ export function initSPA(rootQuerySelector: string, rootComponent: Renderable) {
 
 // A helper to manage asynchronous fetching of data that I've found quite useful.
 // I've found that storing the data directly on this object isn't ideal.
-export function newRefetcher(render: () => void, refetch: () => Promise<void>): AsyncState {
-    const state: AsyncState = {
+export function newRefetcher<T extends any[]>(render: () => void, refetch: (...args: T) => Promise<void>): AsyncState<T> {
+    const state: AsyncState<T> = {
         state: "none",
         errorMessage: undefined,
-        refetch: async () => {
+        refetch: async (...args: T) => {
             state.state = "loading";
             state.errorMessage = undefined;
 
             render();
 
             try {
-                await refetch();
+                await refetch(...args);
 
                 state.state = "loaded";
             } catch(err) {
@@ -731,8 +734,8 @@ export function newRefetcher(render: () => void, refetch: () => Promise<void>): 
     return state;
 }
 
-export type AsyncState = {
+export type AsyncState<T extends any[]> = {
     state: "none" | "loading" |  "loaded" | "failed";
     errorMessage: string | undefined;
-    refetch: () => Promise<void>;
+    refetch: (...args: T) => Promise<void>;
 }

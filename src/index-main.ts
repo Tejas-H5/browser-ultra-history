@@ -1,7 +1,7 @@
 import { div, initSPA, newComponent, newRefetcher, newRenderGroup } from 'src/utils/dom-utils';
 import { CollectedUrlsViewer } from './collected-urls-viewer';
 import { NetworkGraph } from './network-graph';
-import { getAllData, getCurrentLocationDataFromAllData, getTheme, onStateChange, setTheme } from './state';
+import { getAllData, getTheme, onStateChange, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
 
@@ -23,19 +23,12 @@ function App() {
                 rg.component(NetworkGraph())
             ]),
             div({ class: "flex-1 col" }, [
-                rg.componentArgs(UrlExplorer(), () => {
-                    if (!currentTabUrl || !allData) {
-                        return;
-                    }
-
-                    return { data: getCurrentLocationDataFromAllData(currentTabUrl, allData) };
-                }),
+                rg.componentArgs(UrlExplorer(), () => ({ onNavigate })),
                 rg.componentArgs(CollectedUrlsViewer(), () => allData),
             ]),
         ])
     ]);
 
-    let currentTabUrl: string | undefined;
     let allData: any | undefined;
 
     const c = newComponent(appRoot, () => renderAsync());
@@ -46,6 +39,10 @@ function App() {
 
     function render() {
         rg.render();
+    }
+
+    function onNavigate(url: string) {
+        // TODO: navigate to url
     }
 
     async function renderAsync() {
