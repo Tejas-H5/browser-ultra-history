@@ -1,13 +1,25 @@
-import { div, init, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import { div, init, newComponent, newRenderGroup, on, setClass, setText } from 'src/utils/dom-utils';
 import { makeButton } from './components';
 import { openExtensionTab } from './open-pages';
-import { clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getStateJSON, loadStateJSON } from './state';
+import { clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getIsDisabled, getStateJSON, loadStateJSON, setIsDisabled} from './state';
 import { loadFile, saveText } from './utils/file-download';
 
 
+async function toggleDisabled(rerender: () => void) {
+    const isDisabled = await getIsDisabled();
+    await setIsDisabled(!isDisabled);
+    rerender();
+}
+
 export function TopBar(isMain: boolean) {
     const rg = newRenderGroup();
+    const enableDisableButton = on(makeButton("Disabled"), "click", () => toggleDisabled(render));
     const root = div({ class: "row sb1b", style: "gap: 3px" }, [
+        rg(enableDisableButton, async (el) => {
+            const isDisabled = await getIsDisabled();
+            setClass(el, "inverted", !isDisabled);
+            setText(el, isDisabled ? "Collection Disabled" : "Collection Enabled");
+        }),
         !isMain && (
             init(makeButton("Collect from this tab"), (button) => {
                 button.el.addEventListener("click", async () => {
@@ -24,9 +36,6 @@ export function TopBar(isMain: boolean) {
                 });
             })
         ),
-        rg(makeButton(), (el) => {
-            // TODO:: enable/disable button
-        }),
         ...(!isMain ? [] : [
             (
                 init(makeButton("Clear"), (button) => {

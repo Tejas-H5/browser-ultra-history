@@ -1,5 +1,4 @@
 import { makeButton } from "./components";
-import { renderContext } from "./render-context";
 import { CurrentLocationData, LinkInfo, getCurrentLocationData, getCurrentTabUrl } from "./state";
 import { div, divClass, newComponent, newRefetcher, newRenderGroup, newStyleGenerator, on, setClass } from "./utils/dom-utils";
 
@@ -14,14 +13,15 @@ function UrlList()  {
         links: LinkInfo[]; 
         currentUrlsPath: string[];
         isIncoming: boolean;
-        onClick: (key: string, isIncoming: boolean) => void;
+        onClick: (url: string) => void;
     };
 
     function UrlListItem() {
         type Args = {
             linkInfo: LinkInfo;
+            linkUrl: string;
             isIncoming: boolean;
-            onClick(key: string, isIncoming: boolean): void;
+            onClick(url: string): void;
             isAlreadyInPath: boolean;
         };
 
@@ -39,13 +39,14 @@ function UrlList()  {
         const root = divClass("hover-parent hover handle-long-words", {}, [
             rg.text(() => c.args.isIncoming && isMouseOver ? "<-- " : ""),
 
+            rg.text(() => c.args.linkInfo.redirect ? "[Redirect]" : ""),
             rg.text(() => fmt("Style", c.args.linkInfo.styleName)),
             rg.text(() => fmt("Attribute", c.args.linkInfo.attrName)),
             rg.text(() => fmt("Context", c.args.linkInfo.contextString)),
             rg.text(() => fmt("Link text", c.args.linkInfo.linkText)),
             rg.text(() => fmt("Image", c.args.linkInfo.linkImage)),
 
-            rg.text(() => c.args.linkInfo.url),
+            rg.text(() => c.args.linkUrl),
             rg.text(() => !c.args.isIncoming && isMouseOver ? " -->" : ""),
         ]);
 
@@ -65,10 +66,10 @@ function UrlList()  {
         }
 
         on(root, "click", () => {
-            const { onClick, linkInfo, isIncoming } = c.args;
+            const { onClick, linkUrl } = c.args;
 
             if (canClick()) {
-                onClick(linkInfo.url, isIncoming);
+                onClick(linkUrl);
             }
         });
 
@@ -92,11 +93,14 @@ function UrlList()  {
             const { links, isIncoming, currentUrlsPath } = c.args;
             
             for (const linkInfo of links) {
+                const linkUrl = isIncoming ? linkInfo.urlFrom : linkInfo.urlTo;
+
                 getNext().render({
                     linkInfo,
+                    linkUrl,
                     isIncoming,
                     onClick: c.args.onClick,
-                    isAlreadyInPath: currentUrlsPath.includes(linkInfo.url),
+                    isAlreadyInPath: currentUrlsPath.includes(linkUrl),
                 });
             }
         }),
@@ -112,7 +116,9 @@ function UrlList()  {
 }
 
 export function UrlExplorer() {
-    type Args = { onNavigate(url: string): void; };
+    type Args = { 
+        onNavigate(url: string): void; 
+    };
 
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 col" }, [
@@ -188,8 +194,8 @@ export function UrlExplorer() {
             throw new Error("No data collected yet for this location!");
         }
 
-        data.incoming.sort((a, b) => a.url.localeCompare(b.url));
-        data.outgoing.sort((a, b) => a.url.localeCompare(b.url));
+        data.incoming.sort((a, b) => a.urlTo.localeCompare(b.urlTo));
+        data.outgoing.sort((a, b) => a.urlTo.localeCompare(b.urlTo));
     });
 
     function render() {
@@ -197,22 +203,22 @@ export function UrlExplorer() {
     }
 
     async function renderAsync() {
-        if (renderContext.forceRefetch) {
-            currentTabUrlStack.splice(0, currentTabUrlStack.length)
+        const currentTabUrl = await getCurrentTabUrl();
+        if (
+            currentTabUrl && 
+            currentTabUrl !== currentTabUrlStack[0]
+        ) {
+            resetPath(currentTabUrl);
         }
 
-        if (
-            currentTabUrlStack.length !== 0
-        ) {
-            return;
-        }
-        
-        const currentTabUrl = await getCurrentTabUrl();
         if (!currentTabUrl) {
             return;
         }
+    }
 
-        pushPath(currentTabUrl);
+    async function resetPath(url: string) {
+        currentTabUrlStack.splice(0, currentTabUrlStack.length);
+        pushPath(url);
     }
 
     async function pushPath(url: string) {

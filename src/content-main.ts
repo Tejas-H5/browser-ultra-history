@@ -1,6 +1,7 @@
 import { forEachMatch, } from "src/utils/re";
-import { LinkInfo, newLinkInfo, newUrlInfo, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
+import { LinkInfo, getIsDisabled, newLinkInfo, onStateChange, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
 import { div, newRenderGroup } from "./utils/dom-utils";
+import browser from "webextension-polyfill";
 
 declare global {
     interface Window {
@@ -14,48 +15,91 @@ let noneFound = false;
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
 let currentMessage = "";
+let initialized = false;
 
-function init() {
-    const tabUrlString = window.location.href;
-    const tabUrl = new URL(tabUrlString);
+const tabUrlString = window.location.href;
+const tabUrl = new URL(tabUrlString);
+
+async function init() {
+    if (initialized) {
+        return;
+    }
+
+    initialized = true;
+
+    const isDisabled = await getIsDisabled();
 
     // disable this script if we are on the extension page itself.
-    if (protocolIsExtension(tabUrl.protocol)) {
+    if (
+        isDisabled ||
+        protocolIsExtension(tabUrl.protocol)
+    ) {
         return;
     }
 
     document.body.append(popupRoot.el);
-    console.log("appended a thing!", popupRoot.el);
-
-    document.addEventListener("scroll", () => {
-        collectUrlsDebounced();
-    });
-
-    recieveMessage((message, _sender) => {
-        if (message.type === "content_collect_urls") {
-            collectUrlsDebounced();
-        } else if (message.type === "save_urls_finished") {
-            saving = false;
-
-            const numNewUrls = message.numNewUrls;
-            if (numNewUrls === 1) {
-                currentMessage = "Saved 1 new URL!";
-            } else {
-                currentMessage = "Saved " + numNewUrls + " new URLs" + (numNewUrls > 0 ? "!" : "");
-            }
-
-            startClearMessageTimeout();
-
-            renderPopup();
-        }
-
-    }, "content");
-
     renderPopup();
 
     // Collect URLs as soon as we load the page (after the debounce time, of course)
     collectUrlsDebounced();
 }
+
+function uninit() {
+    popupRoot.el.remove();
+    clearTimeout(collectionTimeout)
+    clearTimeout(clearMessageTimeout)
+    initialized = false;
+}
+
+
+recieveMessage((message, _sender) => {
+    if (!initialized) {
+        return;
+    }
+
+    if (message.type === "content_collect_urls") {
+        collectUrlsDebounced();
+        return;
+    }
+
+    if (message.type === "save_urls_finished") {
+        saving = false;
+
+        const numNewUrls = message.numNewUrls;
+        if (numNewUrls === 1) {
+            currentMessage = "Saved 1 new URL!";
+        } else {
+            currentMessage = "Saved " + numNewUrls + " new URLs" + (numNewUrls > 0 ? "!" : "");
+        }
+
+        startClearMessageTimeout();
+
+        renderPopup();
+        return;
+    }
+
+}, "content");
+
+
+// Collect URLs whenever we scroll the page
+document.addEventListener("scroll", () => {
+    if (!initialized) {
+        return;
+    }
+
+    collectUrlsDebounced();
+});
+
+onStateChange(async () => {
+    const isDisabled = await getIsDisabled();
+    if (isDisabled) {
+        uninit();
+    } else {
+        init();
+    }
+});
+
+
 
 // https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml
 // (moz-extension isn't on there, but I use firefox, so I know it's legit)
@@ -133,8 +177,15 @@ function getLinks(): LinkInfo[] | undefined {
     }
 
     const urls: LinkInfo[] = [];
-    const pushUrl = (urlInfo: LinkInfo) => {
-        let url = urlInfo.url;
+
+
+    const pushUrl = (urlInfoPartial: Omit<LinkInfo, "visitedAt" | "urlFrom">) => {
+        const urlInfo = newLinkInfo({
+            ...urlInfoPartial,
+            urlFrom: tabUrlString,
+        });
+
+        let url = urlInfo.urlTo;
         url = url.trim();
         if (
             !url ||
@@ -147,17 +198,17 @@ function getLinks(): LinkInfo[] | undefined {
         try {
             // Convert the URL to an absolute url relative to the current origin.
             const parsed = new URL(url, window.location.origin);
-            urlInfo.url = parsed.href;
+            urlInfo.urlTo = parsed.href;
         } catch {
             // this was an invalid url. dont bother collecting it
             return;
         }
 
-        if (foundUrls.has(urlInfo.url)) {
+        if (foundUrls.has(urlInfo.urlTo)) {
             return;
         }
 
-        foundUrls.add(urlInfo.url);
+        foundUrls.add(urlInfo.urlTo);
         urls.push(urlInfo);
     }
 
@@ -170,7 +221,7 @@ function getLinks(): LinkInfo[] | undefined {
                 continue;
             }
 
-            pushUrl(newLinkInfo({ url, attrName: [attr] }));
+            pushUrl({ urlTo: url, attrName: [attr] });
         }
     }
 
@@ -190,7 +241,7 @@ function getLinks(): LinkInfo[] | undefined {
 
             forEachMatch(val, cssUrlRegex(), (matches) => {
                 const url = matches[1];
-                pushUrl(newLinkInfo({ url, styleName: [styleName] }));
+                pushUrl({ urlTo: url, styleName: [styleName] });
             });
         }
     }
@@ -207,7 +258,7 @@ function getLinks(): LinkInfo[] | undefined {
             const url = matches[1]
 
             const styleName = getStyleName(val, start);
-            pushUrl(newLinkInfo({ url, styleName: [styleName] }));
+            pushUrl({ urlTo: url, styleName: [styleName] });
         });
     }
 
@@ -231,7 +282,7 @@ function getLinks(): LinkInfo[] | undefined {
             const suffix = start+CONTEXT < val.length ? "..." : "";
             const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
 
-            pushUrl(newLinkInfo({ url, contextString: [contextString] })); 
+            pushUrl({ urlTo: url, contextString: [contextString] }); 
         });
     }
 

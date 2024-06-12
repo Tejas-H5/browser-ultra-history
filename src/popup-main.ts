@@ -1,9 +1,9 @@
 import { div, initSPA, newComponent, newRenderGroup } from 'src/utils/dom-utils';
 import browser from "webextension-polyfill";
-import { getCurrentTab, getTheme, onStateChange, setTheme } from './state';
-import { TopBar } from './top-bar';
+import { getCurrentTab, getTheme, onStateChange, setTheme, setUrlBeforeRedirect } from './state';
 import { UrlExplorer } from './url-explorer';
 import { renderContext } from './render-context';
+import { TopBar } from './top-bar';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -25,14 +25,19 @@ function PopupAppRoot() {
         ]),
     ]);
 
-    async function onNavigate(url: string) {
+    async function onNavigate(urlTo: string) {
         const currentTab = await getCurrentTab();
         if (!currentTab) {
             return;
         }
 
+        const { url, id } = currentTab;
+        if (!url || (!id && id !== 0)) {
+            return;
+        }
+
         browser.tabs.update(currentTab.id, {
-            url: url,
+            url: urlTo,
         });
     }
 

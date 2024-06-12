@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
-import { clearAllData, collectUrlsFromTabs, recieveMessage, saveOutgoingLinks } from "./state";
+import { clearAllData, collectUrlsFromTabs, getCurrentTabId, getCurrentTabUrl, getIsDisabled, getUrlBeforeRedirect, newLinkInfo, recieveMessage, saveOutgoingLinks, setUrlBeforeRedirect } from "./state";
 import { runAllTests } from "./tests";
 
 browser.runtime.onInstalled.addListener(() => {
@@ -32,23 +32,54 @@ async function onStart() {
             }
         }
 
-        // browser.webNavigation.onCompleted.addListener((details) => {
-        //     console.log("recieved navigation event");
-        //     // const tabId = details.tabId;
-        //     // collectUrlsFromTabs([{ tabId }]);
-        // });
+        browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
+            const disabled = await getIsDisabled();
+            if (disabled) {
+                return;
+            }
 
-        // browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
-        //     console.log("history updated");
-        //     // TODO: collect stuff??
-        // });
+            if (details.frameId !== 0) {
+                return;
+            }
+
+            const tab = await browser.tabs.get(details.tabId);
+            if (!tab) {
+                return;
+            }
+
+            const url = tab.url;
+            if (!url) {
+                return;
+            }
+
+            if (url === "about:blank") {
+                const prevUrl = await getUrlBeforeRedirect(details.tabId, Date.now());
+
+                if (prevUrl && details.url !== prevUrl) {
+                    console.log("saving redirect:", prevUrl, " -> ", details.url);
+                    await saveOutgoingLinks(prevUrl, [
+                        newLinkInfo({
+                            urlFrom: prevUrl,
+                            urlTo: details.url,
+                            redirect: true,
+                        }),
+                    ]);
+                }
+            } else {
+                await setUrlBeforeRedirect({
+                    currentUrl: details.url,
+                    tabId: details.tabId,
+                    timestamp: Date.now(),
+                });
+            }      
+        });
 
     } catch (e) {
         console.error(e);
     }
 }
 
-recieveMessage((message) => {
+recieveMessage((message, sender) => {
     if (message.type === "log") {
         console.log(message.tabUrl, ":", message.message);
         return;
@@ -64,7 +95,7 @@ recieveMessage((message) => {
     }
 
     if(message.type === "save_urls") {
-        saveOutgoingLinks(message.currentTablUrl, message.outgoingLinks);
+        saveOutgoingLinks(message.currentTablUrl, message.outgoingLinks, sender.tab?.id);
         return;
     }
 });

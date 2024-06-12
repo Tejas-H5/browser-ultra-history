@@ -1,7 +1,6 @@
 import { setCssVars } from "src/utils/dom-utils";
 import browser, { browserAction } from "webextension-polyfill";
 import { logTrace } from "./utils/log";
-import { z } from "zod";
 
 const defaultStorageArea = browser.storage.local;
 
@@ -16,21 +15,7 @@ declare global {
     };
 }
 
-export const AppThemeSchema = z.union([
-    z.literal("Dark"),
-    z.literal("Light"),
-]);
-
-export type AppTheme = z.infer<typeof AppThemeSchema>;
-
-// NOTE: all schemas must be JSON-serializable.
-
-const StateSchema = z.union([
-    z.object({
-        theme: z.string().optional(),
-    }),
-    z.record(z.string(), z.any()),
-]);
+export type AppTheme = "Light" | "Dark";
 
 // Should become a massive union type.
 export type Message = {
@@ -48,10 +33,11 @@ export type Message = {
 } | {
     type: "save_urls_finished",
     numNewUrls: number;
+    id: string;
 } | {
     type: "save_urls";
     currentTablUrl: string; 
-    outgoingLinks: UrlInfo[];
+    outgoingLinks: LinkInfo[];
 };
 
 export function sendMessage(message: Message) {
@@ -68,7 +54,7 @@ export function sendLog(tabUrl: string, text: string) {
 }
 
 export function recieveMessage(
-    callback: (message: Message, sender: object, response: (message: Message) => void) => void,
+    callback: (message: any, sender: browser.Runtime.MessageSender, sendResponse: () => void) => Promise<any> | true | void,
     _debug: string = "idk",
 ) {
     browser.runtime.onMessage.addListener((...args) => {
@@ -127,18 +113,23 @@ export async function getStateJSON() {
 }
 
 export async function loadStateJSON(json: string) {
-    const obj = JSON.parse(json);
-
-    try {
-        const state = StateSchema.parse(obj);
-
-        await defaultStorageArea.clear();
-
-        await defaultStorageArea.set(state);
-    } catch (e) {
-        console.error(e);
+    const obj: object = JSON.parse(json);
+    if (!obj || Array.isArray(obj) || typeof obj !== "object") {
+        throw new Error("Invalid state!");
     }
 
+    // TODO: extract out all the valid keys out of this json, and validate them.
+
+    return obj;
+}
+
+export async function getIsDisabled() {
+    const { isDisabled } = await defaultStorageArea.get("isDisabled")
+    return isDisabled;
+}
+
+export async function setIsDisabled(isDisabled: boolean) {
+    return await defaultStorageArea.set({ isDisabled });
 }
 
 export async function getTheme(): Promise<AppTheme> {
@@ -205,7 +196,7 @@ export function isOutKey(key: string) {
 export const OUT_PREFIX = "#o:";
 
 // an array with a list of urls that this one links to
-export function getAdjIncmingKey(url: string) {
+export function getAdjIncomingKey(url: string) {
     return IN_PREFIX + url;
 }
 
@@ -237,7 +228,8 @@ export async function setLinkMetadata(urlFrom: string, urlTo: string, metadata: 
 
 // TODO: compress these keys somehow, maybe just as arrays, before saving the JSON.
 export type LinkInfo = {
-    url: string;
+    urlTo: string;
+    urlFrom: string;
     visitedAt: string;
 
     // add new props as optionals below
@@ -247,6 +239,7 @@ export type LinkInfo = {
     contextString?: string[];
     linkText?: string[];
     linkImage?: string[];
+    redirect?: boolean;
 };
 
 export type UrlInfo = {
@@ -275,7 +268,7 @@ export async function getUrlsFrom(adjKey: string): Promise<string[]> {
 
 function mergeAdjacencies(existing: string[], incoming: string[]) {
     for (const incomingUrl of incoming) {
-        if (existing.indexOf(incomingUrl) !== -1) {
+        if (existing.includes(incomingUrl)) {
             continue;
         }
 
@@ -320,7 +313,7 @@ function mergeArrays<T>(a: undefined | T[], b: undefined | T[]) {
 }
 
 export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
-    const linkKey = getLinkKey(urlFrom, linkInfo.url);
+    const linkKey = getLinkKey(urlFrom, linkInfo.urlTo);
     const existing = await getLinkInfo(urlFrom, linkKey);
     if (!existing) {
         await defaultStorageArea.set({ [linkKey]: linkInfo });
@@ -336,7 +329,7 @@ export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
     await defaultStorageArea.set({ [linkKey]: existing });
 }
 
-export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: LinkInfo[]) {
+export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: LinkInfo[], tabId?: number) {
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {
         sendMessage({ type: "save_urls", currentTablUrl, outgoingLinks });
@@ -349,7 +342,7 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
     {
         await saveUrlInfo(newUrlInfo({ url: currentTablUrl }));
         for (const link of outgoingLinks) {
-            const isNew = await saveUrlInfo(newUrlInfo({ url: link.url }));
+            const isNew = await saveUrlInfo(newUrlInfo({ url: link.urlTo }));
             if (isNew) {
                 numNewUrls += 1;
             }
@@ -367,7 +360,7 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
     {
         const urlOutLinksKey = getAdjOutgoingKey(currentTablUrl);
         const urlOutLinks = await getUrlsFrom(urlOutLinksKey);
-        const urlOutLinksNew: string[] = outgoingLinks.map(info => info.url);
+        const urlOutLinksNew: string[] = outgoingLinks.map(info => info.urlTo);
 
         const mergedAdj = mergeAdjacencies(urlOutLinks, urlOutLinksNew);
 
@@ -376,7 +369,7 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
         };
 
         for (const newOutgoingUrl of urlOutLinksNew) {
-            const newOutgoingIncomingKey = getAdjIncmingKey(newOutgoingUrl);
+            const newOutgoingIncomingKey = getAdjIncomingKey(newOutgoingUrl);
             const newOutgoingIncoming = await getUrlsFrom(newOutgoingIncomingKey);
 
             const mergedAdj = mergeAdjacencies(newOutgoingIncoming, [ currentTablUrl ]);
@@ -387,7 +380,44 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
         await defaultStorageArea.set(savePayload);
     }
 
-    sendMessageToTabs({ type: "save_urls_finished", numNewUrls  });
+    if (currentTablUrl) {
+        const tabs = await browser.tabs.query({ url: currentTablUrl });
+        if (tabs.length > 0) {
+            sendMessageToTabs({ type: "save_urls_finished", numNewUrls, id: currentTablUrl  }, tabId ? [{ tabId }] : undefined);
+        }
+    }
+}
+
+type UrlBeforeRedirectData = {
+    currentUrl: string;
+    tabId: number;
+    timestamp: number;
+}
+
+export async function setUrlBeforeRedirect(data: UrlBeforeRedirectData | undefined) {
+    if (!data) {
+        await defaultStorageArea.remove("redirectTempPersistance");
+    } else {
+        await defaultStorageArea.set({ "redirectTempPersistance": data });
+    }
+}
+
+export async function getUrlBeforeRedirect(currentTabId: number, currentTimestamp: number) {
+    const { redirectTempPersistance } = await defaultStorageArea.get("redirectTempPersistance");
+    if (!redirectTempPersistance) {
+        return undefined;
+    }
+
+    const { currentUrl, tabId, timestamp } = redirectTempPersistance as UrlBeforeRedirectData;
+    if (
+        tabId !== currentTabId ||
+        // Make it stale after 1 min.
+        (currentTimestamp - timestamp) > (1000 * 60)
+    ) {
+        return undefined;
+    }
+
+    return currentUrl;
 }
 
 export async function collectUrlsFromTabs() {
@@ -415,7 +445,7 @@ export async function collectUrlsFromActiveTab() {
 
 function getCurrentLocationDataKeys(windowLocationHref: string) {
     const urlKey = getUrlKey(windowLocationHref);
-    const incomingKey = getAdjIncmingKey(windowLocationHref);
+    const incomingKey = getAdjIncomingKey(windowLocationHref);
     const outgoingKey = getAdjOutgoingKey(windowLocationHref);
 
     return { urlKey, incomingKey, outgoingKey };
@@ -457,6 +487,7 @@ export function onStateChange(fn: () => void) {
 export async function getAllData(): Promise<any> {
     return await defaultStorageArea.get(null);
 }
+
 
 const THOUSANDS_SUFFIXES = ["", "k", "m", "b", "t", "q", "s",];
 function formatNumberForBadge(num: number): string {
