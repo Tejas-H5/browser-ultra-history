@@ -1,9 +1,9 @@
-import { div, initSPA, newComponent, newRenderGroup } from 'src/utils/dom-utils';
+import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import browser from "webextension-polyfill";
-import { getCurrentTab, getTheme, onStateChange, setTheme, setUrlBeforeRedirect } from './state';
-import { UrlExplorer } from './url-explorer';
 import { renderContext } from './render-context';
+import { getCurrentTab, getTheme, onStateChange, sendMessageToCurrentTab, setTheme } from './state';
 import { TopBar } from './top-bar';
+import { UrlExplorer } from './url-explorer';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -17,13 +17,20 @@ function PopupAppRoot() {
         class: "fixed col",
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
-        rg.component(TopBar(false)),
+        rg.c(TopBar(false)),
         div({ class: "flex-1 col" }, [
-            rg.componentArgs(UrlExplorer(), () => {
-                return { onNavigate }
+            rg.cArgs(UrlExplorer(), () => {
+                return {
+                    onNavigate,
+                    onHighlightUrl,
+                }
             }),
         ]),
     ]);
+
+    function onHighlightUrl(url: string) {
+        sendMessageToCurrentTab({ type: "content_highlight_url", url })
+    }
 
     async function onNavigate(urlTo: string) {
         const currentTab = await getCurrentTab();
@@ -55,7 +62,10 @@ function PopupAppRoot() {
 }
 
 const app = PopupAppRoot();
-initSPA("#app", app);
+appendChild(
+    newInsertable(document.body),
+    app
+);
 
 // Set the size to max
 const body = document.querySelector("body")!;

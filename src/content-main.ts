@@ -1,7 +1,6 @@
 import { forEachMatch, } from "src/utils/re";
 import { LinkInfo, getIsDisabled, newLinkInfo, onStateChange, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
-import { div, newRenderGroup } from "./utils/dom-utils";
-import browser from "webextension-polyfill";
+import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
 
 declare global {
     interface Window {
@@ -9,13 +8,13 @@ declare global {
     }
 }
 
-const foundUrls = new Set<string>();
 let saving = false;
 let noneFound = false;
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
 let currentMessage = "";
 let initialized = false;
+let lastCollectedUrls: LinkQueryResult[] = [];
 
 const tabUrlString = window.location.href;
 const tabUrl = new URL(tabUrlString);
@@ -37,7 +36,6 @@ async function init() {
         return;
     }
 
-    document.body.append(popupRoot.el);
     renderPopup();
 
     // Collect URLs as soon as we load the page (after the debounce time, of course)
@@ -59,6 +57,11 @@ recieveMessage((message, _sender) => {
 
     if (message.type === "content_collect_urls") {
         collectUrlsDebounced();
+        return;
+    }
+
+    if (message.type === "content_highlight_url") {
+        highlightUrlOnPage(message.url);
         return;
     }
 
@@ -110,6 +113,10 @@ function protocolIsExtension(protocol: string) {
 }
 
 async function collectLinks() {
+    if (!initialized) {
+        return;
+    }
+
     const tabUrlString = window.location.href;
     const tabUrl = new URL(tabUrlString);
 
@@ -117,7 +124,6 @@ async function collectLinks() {
     if (protocolIsExtension(tabUrl.protocol)) {
         return;
     }
-
 
     saving = false;
     noneFound = false;
@@ -130,6 +136,8 @@ async function collectLinks() {
     renderPopup();
 
     const links = getLinks();
+    lastCollectedUrls = links ?? [];
+
     if (!links || links.length === 0) {
         saving = false;
         noneFound = true;
@@ -144,7 +152,69 @@ async function collectLinks() {
     currentMessage = "Saving new URLs...";
     renderPopup();
 
-    saveOutgoingLinks(tabUrlString, links);
+    const visibleUrls = links.filter(result => result.domNode && isVisibleElement(result.domNode))
+            .map(result => result.linkInfo.urlTo);
+
+    await saveOutgoingLinks(tabUrlString, links.map(result => result.linkInfo), visibleUrls);
+}
+
+
+const rectEl = div({ id: "highlightRectThing", style: "position: fixed; background-color: #F00; z-index: 999999;" });
+let removeTimout = 0;
+let opacity = 1.0;
+let increment = 1.0 / 15;
+function animateOpacity() {
+    rectEl.el.style.backgroundColor = `rgba(255, 0, 0, ${opacity})`;
+    opacity -= increment;
+
+    // Recursive timeout!!!!
+    if (opacity > 0) {
+        removeTimout = setTimeout(animateOpacity, 1000 / 30);
+    } else {
+        rectEl.el.remove();
+    }
+}
+export function highlightPortionOfScreen({top, bottom, left, right} : { top: number, bottom: number, left: number, right: number }) {
+    document.body.appendChild(rectEl.el);
+
+    opacity = 1;
+    rectEl.el.style.top = top + "px";
+    rectEl.el.style.left = left + "px";
+    // https://developer.mozilla.org/docs/Web/API/Element/getBoundingClientRect
+    // inset left and right isn't the same as this lmao
+    rectEl.el.style.right = (window.window.innerWidth - right) + "px";
+    rectEl.el.style.bottom = (window.window.innerHeight - bottom) + "px";
+
+    clearTimeout(removeTimout);
+    animateOpacity();
+}
+
+function highlightUrlOnPage(url: string) {
+    const res = lastCollectedUrls.find(result => result.linkInfo.urlTo === url);
+    const domNode = res?.domNode;
+    if (!domNode) {
+        currentMessage = "This URL doesn't seem to be on an item on this page";
+    } else {
+        currentMessage = "Attempting to scroll to the node";
+        if (!isVisibleElement(domNode)) {
+            currentMessage = "Attempting to scroll to the node. However, it may not not work, as it doesn't seem to be visible...";
+        }
+
+        domNode.scrollIntoView({
+            behavior: "instant",
+            block: "center",
+            inline: "center",
+        });
+
+        setTimeout(() => {
+            const rect = domNode.getBoundingClientRect();
+            const { top, bottom, left, right } = rect;
+            highlightPortionOfScreen({ top, bottom, left, right });
+        }, 300)
+    }
+
+    renderPopup();
+    startClearMessageTimeout();
 }
 
 function sendLog(message: string) {
@@ -170,22 +240,29 @@ function cssUrlRegex() {
     return /url\(["'](.*?)["']\)/g;
 }
 
-function getLinks(): LinkInfo[] | undefined {
+type LinkQueryResult = {
+    linkInfo: LinkInfo;
+    domNode?: HTMLElement;
+}
+
+function getLinks(): LinkQueryResult[] | undefined {
     const root = document.querySelector("html");
     if (!root) {
         return undefined;
     }
 
-    const urls: LinkInfo[] = [];
+    const urls: LinkQueryResult[] = [];
 
-
-    const pushUrl = (urlInfoPartial: Omit<LinkInfo, "visitedAt" | "urlFrom">) => {
-        const urlInfo = newLinkInfo({
+    const pushUrl = (
+        urlInfoPartial: Omit<LinkInfo, "visitedAt" | "urlFrom">,
+        domNode: HTMLElement | null | undefined,
+    ) => {
+        const linkInfo = newLinkInfo({
             ...urlInfoPartial,
             urlFrom: tabUrlString,
         });
 
-        let url = urlInfo.urlTo;
+        let url = linkInfo.urlTo;
         url = url.trim();
         if (
             !url ||
@@ -198,36 +275,52 @@ function getLinks(): LinkInfo[] | undefined {
         try {
             // Convert the URL to an absolute url relative to the current origin.
             const parsed = new URL(url, window.location.origin);
-            urlInfo.urlTo = parsed.href;
+            linkInfo.urlTo = parsed.href;
         } catch {
             // this was an invalid url. dont bother collecting it
             return;
         }
 
-        if (foundUrls.has(urlInfo.urlTo)) {
+        if (linkInfo.urlTo === window.location.href) {
+            // ignore self referencials
             return;
         }
 
-        foundUrls.add(urlInfo.urlTo);
-        urls.push(urlInfo);
+        urls.push({ linkInfo, domNode: domNode || undefined });
     }
 
     sendLog("started collection");
 
-    function pushAllOfAttr(tag: string, attr: string) {
+    function pushAllOfAttr(tag: string, attr: string, isAsset: true | undefined = undefined) {
         for (const el of document.getElementsByTagName(tag)) {
             const url = el.getAttribute(attr);
             if (!url) {
                 continue;
             }
 
-            pushUrl({ urlTo: url, attrName: [attr] });
+            let linkText = undefined;
+            if (tag === "a") {
+                // truncate the link text if the text is too big
+                linkText = el.textContent?.substring(0, 500);
+                if (linkText && linkText?.length === 500) {
+                    linkText += "...";
+                }
+            }
+
+            pushUrl({ 
+                urlTo: url, 
+                attrName: [attr], 
+                linkText: linkText ? [linkText] : undefined, 
+                isAsset,
+            }, el as HTMLElement);
         }
     }
 
     pushAllOfAttr("a", "href");
-    pushAllOfAttr("link", "href");
-    pushAllOfAttr("img", "src");
+    pushAllOfAttr("link", "href", true);
+    pushAllOfAttr("img", "src", true);
+    pushAllOfAttr("video", "src", true);
+    pushAllOfAttr("source", "src", true);
 
     sendLog("collected from attributes");
 
@@ -241,7 +334,7 @@ function getLinks(): LinkInfo[] | undefined {
 
             forEachMatch(val, cssUrlRegex(), (matches) => {
                 const url = matches[1];
-                pushUrl({ urlTo: url, styleName: [styleName] });
+                pushUrl({ urlTo: url, styleName: [styleName], isAsset: true, }, el);
             });
         }
     }
@@ -255,10 +348,10 @@ function getLinks(): LinkInfo[] | undefined {
 
         // Matching the css url("blah") function contents here.
         forEachMatch(val, cssUrlRegex(), (matches, start) => {
-            const url = matches[1]
+            const url = matches[1];
 
             const styleName = getStyleName(val, start);
-            pushUrl({ urlTo: url, styleName: [styleName] });
+            pushUrl({ urlTo: url, styleName: [styleName], isAsset: true }, el);
         });
     }
 
@@ -282,7 +375,27 @@ function getLinks(): LinkInfo[] | undefined {
             const suffix = start+CONTEXT < val.length ? "..." : "";
             const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
 
-            pushUrl({ urlTo: url, contextString: [contextString] }); 
+            const parentEl = walker.currentNode.parentElement;
+            let parentElType = undefined;
+            // name is actually a mistype. I really want to know if its a div or script or whatever.
+            if (parentEl?.tagName) {
+                parentElType = parentEl?.tagName.toUpperCase();
+            }
+
+            let isAsset = undefined;
+            if (
+                parentElType === "SCRIPT" ||
+                parentElType === "STYLE"
+            ) {
+                isAsset = true;
+            }
+
+            pushUrl({ 
+                urlTo: url, 
+                contextString: [contextString], 
+                parentType: !parentElType ? undefined : [parentElType] ,
+                isAsset,
+            }, parentEl); 
         });
     }
 
@@ -317,16 +430,19 @@ function collectUrlsDebounced() {
     renderPopup();
 }
 
+
+
 const rg = newRenderGroup();
 // NOTE: I've not figured out how to get css classes to work here yet, since it's a content script.
-const popupRoot = rg.if(() => !!currentMessage, div({ 
-    style: "all: unset; z-index: 999999; font-family: monospace; font-size: 16px; position: fixed; bottom: 10px; right: 10px; background-color: black; color: white; text-align: right;" +
+const popupRoot = rg.if(() => !!currentMessage, (rg) => div({ 
+    style: "all: unset; z-index: 999999; font-family: monospace; font-size: 16px; position: fixed; bottom: 10px; left: 10px; background-color: black; color: white; text-align: right;" +
         "padding: 10px;"
 }, [
     rg.text(() => currentMessage),
 ]));
 
 function renderPopup() {
+    document.body.appendChild(popupRoot.el);
     rg.render();
 }
 

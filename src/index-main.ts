@@ -1,9 +1,10 @@
-import { div, initSPA, newComponent, newRefetcher, newRenderGroup } from 'src/utils/dom-utils';
-import { CollectedUrlsViewer } from './collected-urls-viewer';
+import { appendChild, div, el, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import { NetworkGraph } from './network-graph';
-import { getAllData, getTheme, onStateChange, setTheme } from './state';
+import { getAllData, getRecentlyVisitedUrls, getTheme, onStateChange, setTheme } from './state';
 import { TopBar } from './top-bar';
-import { UrlExplorer } from './url-explorer';
+import { LinkItem, UrlExplorer } from './url-explorer';
+import { newRefetcher } from './utils/refetcher';
+import { CollectedUrlsViewer } from './collected-urls-viewer';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")
@@ -17,24 +18,41 @@ function App() {
     }, [
         div({ class: "flex-1 col" }, [
             div({ class: "sbb1" }, [
-                rg.component(TopBar(true)),
+                rg.c(TopBar(true)),
             ]),
-            div({ class: "flex-1 col flex-center" }, [
-                rg.component(NetworkGraph())
-            ]),
-            div({ class: "flex-1 col" }, [
-                rg.componentArgs(UrlExplorer(), () => ({ onNavigate })),
-                rg.componentArgs(CollectedUrlsViewer(), () => allData),
-            ]),
+            div({ class: "flex-1 row " }, [
+                div({ class: "flex-1 col" }, [
+                    div({ class: "flex-1 col" }, [
+                        rg.c(NetworkGraph())
+                    ]),
+                    div({ class: "flex-1 col" }, [
+                        rg.cArgs(CollectedUrlsViewer(), () => allData),
+                    ]),
+                ]),
+                div({ style: "width: 25%" }, [
+                    el("H3", {}, "Recently visited"),
+                    rg.list(div(), LinkItem, (getNext) => {
+                        for(const url of recentUrls) {
+                            getNext().render({ 
+                                linkUrl: url,
+                                onClick: onNavigate,
+                            });
+                        }
+                    })
+                ])
+            ])
         ])
     ]);
 
     let allData: any | undefined;
+    let recentUrls: string[] = [];
 
     const c = newComponent(appRoot, () => renderAsync());
 
     const fetchState = newRefetcher(render, async () => {
-        return await getAllData();
+        allData = await getAllData();
+        recentUrls = await getRecentlyVisitedUrls();
+        recentUrls.reverse();
     });
 
     function render() {
@@ -42,7 +60,7 @@ function App() {
     }
 
     function onNavigate(url: string) {
-        // TODO: navigate to url
+        // TODO: open new tab to url, or copy to clipboard
     }
 
     async function renderAsync() {
@@ -63,7 +81,10 @@ function App() {
 }
 
 const app = App();
-initSPA("#app", app);
+appendChild(
+    newInsertable(document.body),
+    app
+);
 
 function rerenderApp() {
     app.render(undefined);

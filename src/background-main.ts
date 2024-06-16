@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
-import { clearAllData, collectUrlsFromTabs, getCurrentTabId, getCurrentTabUrl, getIsDisabled, getUrlBeforeRedirect, newLinkInfo, recieveMessage, saveOutgoingLinks, setUrlBeforeRedirect } from "./state";
+import { clearAllData, collectUrlsFromTabs, getIsDisabled, getRecentlyVisitedUrls, getUrlBeforeRedirect, newLinkInfo, recieveMessage, saveOutgoingLinks, saveRecentlyVisitedUrls, setUrlBeforeRedirect } from "./state";
 import { runAllTests } from "./tests";
 
 browser.runtime.onInstalled.addListener(() => {
@@ -32,6 +32,22 @@ async function onStart() {
             }
         }
 
+        browser.webNavigation.onCompleted.addListener(async (details) => {
+            const tab = await browser.tabs.get(details.tabId);
+            if (!tab) {
+                return;
+            }
+
+            const url = tab.url;
+            if (!url) {
+                return;
+            }
+
+            const recentlyVisited = await getRecentlyVisitedUrls();
+            recentlyVisited.push(url);
+            await saveRecentlyVisitedUrls(recentlyVisited);
+        });
+
         browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const disabled = await getIsDisabled();
             if (disabled) {
@@ -53,25 +69,27 @@ async function onStart() {
             }
 
             if (url === "about:blank") {
-                const prevUrl = await getUrlBeforeRedirect(details.tabId, Date.now());
+                const prevUrl = await getUrlBeforeRedirect({ tabId: details.tabId }, Date.now());
 
                 if (prevUrl && details.url !== prevUrl) {
-                    console.log("saving redirect:", prevUrl, " -> ", details.url);
-                    await saveOutgoingLinks(prevUrl, [
-                        newLinkInfo({
-                            urlFrom: prevUrl,
-                            urlTo: details.url,
-                            redirect: true,
-                        }),
-                    ]);
+                    await saveOutgoingLinks(
+                        prevUrl, 
+                        [
+                            newLinkInfo({
+                                urlFrom: prevUrl,
+                                urlTo: details.url,
+                                redirect: true,
+                            }), 
+                        ], 
+                        []
+                    );
                 }
             } else {
-                await setUrlBeforeRedirect({
+                await setUrlBeforeRedirect({ tabId: details.tabId }, {
                     currentUrl: details.url,
-                    tabId: details.tabId,
                     timestamp: Date.now(),
                 });
-            }      
+            }
         });
 
     } catch (e) {
@@ -95,7 +113,7 @@ recieveMessage((message, sender) => {
     }
 
     if(message.type === "save_urls") {
-        saveOutgoingLinks(message.currentTablUrl, message.outgoingLinks, sender.tab?.id);
+        saveOutgoingLinks(message.currentTablUrl, message.outgoingLinks, message.currentVisibleUrls);
         return;
     }
 });

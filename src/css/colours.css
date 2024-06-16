@@ -42,7 +42,7 @@
 
 /** error handling and debugging */
 
-.catastrophic---error>* { display: none; }
+.catastrophic---error > * { display: none !important; }
 .catastrophic---error::before {
     content: "An error occured when updating this content. You've found a bug!";
 }

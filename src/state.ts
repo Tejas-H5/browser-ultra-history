@@ -29,8 +29,6 @@ export type Message = {
     type: "start_collection_from_tabs";
     tabIds?: TabId[];
 } | {
-    type: "content_collect_urls"
-} | {
     type: "save_urls_finished",
     numNewUrls: number;
     id: string;
@@ -38,6 +36,12 @@ export type Message = {
     type: "save_urls";
     currentTablUrl: string; 
     outgoingLinks: LinkInfo[];
+    currentVisibleUrls: string[];
+} | {
+    type: "content_collect_urls"
+} | {
+    type: "content_highlight_url",
+    url: string,
 };
 
 export function sendMessage(message: Message) {
@@ -54,7 +58,7 @@ export function sendLog(tabUrl: string, text: string) {
 }
 
 export function recieveMessage(
-    callback: (message: any, sender: browser.Runtime.MessageSender, sendResponse: () => void) => Promise<any> | true | void,
+    callback: (message: Message, sender: browser.Runtime.MessageSender, sendResponse: () => void) => Promise<any> | true | void,
     _debug: string = "idk",
 ) {
     browser.runtime.onMessage.addListener((...args) => {
@@ -73,6 +77,15 @@ export async function getCurrentTabId(): Promise<TabId | undefined> {
     }
 
     return { tabId: tab.id };
+}
+
+export async function sendMessageToCurrentTab(message: Message) {
+    const activeTab = await getCurrentTabId();
+    if (!activeTab) {
+        return;
+    }
+
+    await sendMessageToTabs(message, [activeTab]);
 }
 
 export async function sendMessageToTabs(message: Message, specificTabs?: TabId[]) {
@@ -215,10 +228,9 @@ export async function getUrlInfo(urlKey: string): Promise<UrlInfo | undefined> {
     return data[urlKey] as UrlInfo | undefined;
 }
 
-export async function getLinkInfo(urlFrom: string, urlTo: string): Promise<LinkInfo | undefined> {
-    const key = getLinkKey(urlFrom, urlTo);
-    const data = await defaultStorageArea.get(key);
-    return data[key] as LinkInfo | undefined;
+export async function getLinkInfo(linkKey: string): Promise<LinkInfo | undefined> {
+    const data = await defaultStorageArea.get(linkKey);
+    return data[linkKey] as LinkInfo | undefined;
 }
 
 export async function setLinkMetadata(urlFrom: string, urlTo: string, metadata: LinkInfo) {
@@ -232,14 +244,23 @@ export type LinkInfo = {
     urlFrom: string;
     visitedAt: string;
 
-    // add new props as optionals below
+    /** 
+     * add new props as optionals below.
+     * Don't forget to update the merging code in {@link saveLinkInfo} !
+     */
+
+    // was this a redirect from some other outgoing url?
+    redirect?: boolean;
+
+    // did we find this in a stylesheet?
+    isAsset?: boolean;
 
     styleName?: string[];
     attrName?: string[];
-    contextString?: string[];
     linkText?: string[];
     linkImage?: string[];
-    redirect?: boolean;
+    contextString?: string[];
+    parentType?: string[];
 };
 
 export type UrlInfo = {
@@ -314,7 +335,7 @@ function mergeArrays<T>(a: undefined | T[], b: undefined | T[]) {
 
 export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
     const linkKey = getLinkKey(urlFrom, linkInfo.urlTo);
-    const existing = await getLinkInfo(urlFrom, linkKey);
+    const existing = await getLinkInfo(linkKey);
     if (!existing) {
         await defaultStorageArea.set({ [linkKey]: linkInfo });
         return;
@@ -325,18 +346,30 @@ export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
     existing.contextString = mergeArrays(existing.contextString, linkInfo.contextString);
     existing.linkText = mergeArrays(existing.linkText, linkInfo.linkText);
     existing.linkImage = mergeArrays(existing.linkImage, linkInfo.linkImage);
+    existing.linkText = mergeArrays(existing.linkText, linkInfo.linkText);
+    existing.parentType = mergeArrays(existing.parentType, linkInfo.parentType);
+
+    if (linkInfo.isAsset === true) {
+        existing.isAsset = true
+    }
 
     await defaultStorageArea.set({ [linkKey]: existing });
 }
 
-export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: LinkInfo[], tabId?: number) {
+export async function saveOutgoingLinks(
+    currentTablUrl: string, 
+    outgoingLinks: LinkInfo[], 
+    currentVisibleUrls: string[],
+) {
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {
-        sendMessage({ type: "save_urls", currentTablUrl, outgoingLinks });
+        sendMessage({ type: "save_urls", currentTablUrl, outgoingLinks, currentVisibleUrls });
         return;
     }
 
     let numNewUrls = 0;
+
+    await defaultStorageArea.set({ currentVisibleUrls });
 
     // save the url infos
     {
@@ -382,7 +415,8 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
 
     if (currentTablUrl) {
         const tabs = await browser.tabs.query({ url: currentTablUrl });
-        if (tabs.length > 0) {
+        const tabId = tabs[0]?.id;
+        if (tabs.length > 0 && tabId) {
             sendMessageToTabs({ type: "save_urls_finished", numNewUrls, id: currentTablUrl  }, tabId ? [{ tabId }] : undefined);
         }
     }
@@ -390,27 +424,33 @@ export async function saveOutgoingLinks(currentTablUrl: string, outgoingLinks: L
 
 type UrlBeforeRedirectData = {
     currentUrl: string;
-    tabId: number;
     timestamp: number;
 }
 
-export async function setUrlBeforeRedirect(data: UrlBeforeRedirectData | undefined) {
+export function getTabKey(tabId: TabId): string {
+    return "tab:" + tabId.tabId + "|";
+}
+
+export async function setUrlBeforeRedirect(tabId: TabId, data: UrlBeforeRedirectData | undefined) {
+    const key = getTabKey(tabId) + "redirectTempPersistance";
     if (!data) {
-        await defaultStorageArea.remove("redirectTempPersistance");
+        await defaultStorageArea.remove(key);
     } else {
-        await defaultStorageArea.set({ "redirectTempPersistance": data });
+        await defaultStorageArea.set({ [key]: data });
     }
 }
 
-export async function getUrlBeforeRedirect(currentTabId: number, currentTimestamp: number) {
-    const { redirectTempPersistance } = await defaultStorageArea.get("redirectTempPersistance");
+export async function getUrlBeforeRedirect(currentTabId: TabId, currentTimestamp: number) {
+    const key = getTabKey(currentTabId) + "redirectTempPersistance";
+
+    const data = await defaultStorageArea.get(key);
+    const redirectTempPersistance = data[key];
     if (!redirectTempPersistance) {
         return undefined;
     }
 
-    const { currentUrl, tabId, timestamp } = redirectTempPersistance as UrlBeforeRedirectData;
+    const { currentUrl, timestamp } = redirectTempPersistance as UrlBeforeRedirectData;
     if (
-        tabId !== currentTabId ||
         // Make it stale after 1 min.
         (currentTimestamp - timestamp) > (1000 * 60)
     ) {
@@ -418,6 +458,15 @@ export async function getUrlBeforeRedirect(currentTabId: number, currentTimestam
     }
 
     return currentUrl;
+}
+
+export async function getRecentlyVisitedUrls(): Promise<string[]> {
+    const { recentlyVisitedUrls } = await defaultStorageArea.get("recentlyVisitedUrls");
+    return recentlyVisitedUrls || [];
+}
+
+export async function saveRecentlyVisitedUrls(urls: string[]) {
+    await defaultStorageArea.set({ recentlyVisitedUrls: urls });
 }
 
 export async function collectUrlsFromTabs() {
@@ -435,25 +484,23 @@ export async function getCurrentTabUrl(): Promise<string | undefined> {
 }
 
 export async function collectUrlsFromActiveTab() {
-    const activeTab = await getCurrentTabId();
-    if (!activeTab) {
-        return;
-    }
-
-    await sendMessageToTabs({ type: "content_collect_urls" }, [activeTab]);
+    return await sendMessageToCurrentTab({ type: "content_collect_urls" });
 }
 
 function getCurrentLocationDataKeys(windowLocationHref: string) {
     const urlKey = getUrlKey(windowLocationHref);
     const incomingKey = getAdjIncomingKey(windowLocationHref);
     const outgoingKey = getAdjOutgoingKey(windowLocationHref);
+    const currentVisibleKeys = "currentVisibleUrls";
 
-    return { urlKey, incomingKey, outgoingKey };
+    return { urlKey, incomingKey, outgoingKey, currentVisibleKeys };
 }
 
 export async function getCurrentLocationData(windowLocationHref: string): Promise<CurrentLocationData> {
     const keys = getCurrentLocationDataKeys(windowLocationHref);
     const data = await defaultStorageArea.get(Object.values(keys));
+
+    const currentVisibleUrls: string[] = data[keys.currentVisibleKeys] || [];
 
     const metadata: UrlInfo = data[keys.urlKey];
     const incoming: string[] = data[keys.incomingKey] || [];
@@ -469,6 +516,7 @@ export async function getCurrentLocationData(windowLocationHref: string): Promis
         metadata,
         incoming: Object.values(adjKeysInData),
         outgoing: Object.values(adjKeysOutData),
+        currentVisibleUrls: currentVisibleUrls,
     }
 }
 
@@ -476,6 +524,7 @@ export type CurrentLocationData = {
     incoming: LinkInfo[];
     outgoing: LinkInfo[];
     metadata: UrlInfo | undefined;
+    currentVisibleUrls: string[];
 }
 
 export function onStateChange(fn: () => void) {

@@ -13,6 +13,7 @@ function UrlItem() {
     return c;
 }
 
+// component is in limbo. TODO: finsih or delete
 export function CollectedUrlsViewer() {
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 flex-center" }, [
