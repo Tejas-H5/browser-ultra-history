@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
-import { clearAllData, collectUrlsFromTabs, getIsDisabled, getRecentlyVisitedUrls, getUrlBeforeRedirect, newLinkInfo, recieveMessage, saveOutgoingLinks, saveRecentlyVisitedUrls, setUrlBeforeRedirect } from "./state";
+import { clearAllData, collectUrlsFromTabs, getEnabledFlags, getRecentlyVisitedUrls, getUrlBeforeRedirect, newLinkInfo, recieveMessage, saveOutgoingLinks, saveRecentlyVisitedUrls, setUrlBeforeRedirect } from "./state";
 import { runAllTests } from "./tests";
 
 browser.runtime.onInstalled.addListener(() => {
@@ -49,8 +49,8 @@ async function onStart() {
         });
 
         browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
-            const disabled = await getIsDisabled();
-            if (disabled) {
+            const enabledFlags = await getEnabledFlags();
+            if (!enabledFlags.extension) {
                 return;
             }
 

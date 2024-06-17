@@ -1,6 +1,7 @@
 import { forEachMatch, } from "src/utils/re";
-import { LinkInfo, getIsDisabled, newLinkInfo, onStateChange, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
+import { EnabledFlags, LinkInfo, getEnabledFlags, newLinkInfo, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
 import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
+import { onStateChange } from "./default-storage-area";
 
 declare global {
     interface Window {
@@ -15,9 +16,15 @@ let clearMessageTimeout = 0;
 let currentMessage = "";
 let initialized = false;
 let lastCollectedUrls: LinkQueryResult[] = [];
+let enabledFlags: EnabledFlags | undefined;
 
 const tabUrlString = window.location.href;
 const tabUrl = new URL(tabUrlString);
+
+// Only works _after_ init() is called
+function isEnabled() {
+    return initialized && enabledFlags?.extension;
+}
 
 async function init() {
     if (initialized) {
@@ -25,12 +32,11 @@ async function init() {
     }
 
     initialized = true;
-
-    const isDisabled = await getIsDisabled();
+    enabledFlags = await getEnabledFlags();
 
     // disable this script if we are on the extension page itself.
     if (
-        isDisabled ||
+        !isEnabled() ||
         protocolIsExtension(tabUrl.protocol)
     ) {
         return;
@@ -51,7 +57,7 @@ function uninit() {
 
 
 recieveMessage((message, _sender) => {
-    if (!initialized) {
+    if (!isEnabled()) {
         return;
     }
 
@@ -86,7 +92,7 @@ recieveMessage((message, _sender) => {
 
 // Collect URLs whenever we scroll the page
 document.addEventListener("scroll", () => {
-    if (!initialized) {
+    if (!isEnabled()) {
         return;
     }
 
@@ -94,14 +100,13 @@ document.addEventListener("scroll", () => {
 });
 
 onStateChange(async () => {
-    const isDisabled = await getIsDisabled();
-    if (isDisabled) {
-        uninit();
-    } else {
+    const enabledFlags = await getEnabledFlags();
+    if (enabledFlags.extension) {
         init();
+    } else {
+        uninit();
     }
 });
-
 
 
 // https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml
@@ -113,7 +118,7 @@ function protocolIsExtension(protocol: string) {
 }
 
 async function collectLinks() {
-    if (!initialized) {
+    if (!isEnabled() ) {
         return;
     }
 
@@ -246,6 +251,11 @@ type LinkQueryResult = {
 }
 
 function getLinks(): LinkQueryResult[] | undefined {
+    if (!enabledFlags || !enabledFlags.extension) {
+        sendLog("Warning: ran `getLinks` without any enabled flags - indicates a bug in our code");
+        return [];
+    }
+
     const root = document.querySelector("html");
     if (!root) {
         return undefined;
@@ -317,6 +327,8 @@ function getLinks(): LinkQueryResult[] | undefined {
     }
 
     pushAllOfAttr("a", "href");
+    if (enabledFlags.deepCollect) {
+    }
     pushAllOfAttr("link", "href", true);
     pushAllOfAttr("img", "src", true);
     pushAllOfAttr("video", "src", true);
@@ -324,44 +336,68 @@ function getLinks(): LinkQueryResult[] | undefined {
 
     sendLog("collected from attributes");
 
-    // elements with inline styles
-    for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
-        for (const styleName in el.style) {
-            const val = el.style[styleName];
-            if (!val || typeof val !== "string") {
+    if (enabledFlags.deepCollect) {
+        // elements with inline styles
+        for (const el of document.querySelectorAll<HTMLElement>("[style]")) {
+            for (const styleName in el.style) {
+                const val = el.style[styleName];
+                if (!val || typeof val !== "string") {
+                    continue;
+                }
+
+                forEachMatch(val, cssUrlRegex(), (matches) => {
+                    const url = matches[1];
+                    pushUrl({ urlTo: url, styleName: [styleName], isAsset: true, }, el);
+                });
+            }
+        }
+
+        // stylesheets
+        for (const el of document.getElementsByTagName("style")) {
+            const val = el.textContent;
+            if (!val) {
                 continue;
             }
 
-            forEachMatch(val, cssUrlRegex(), (matches) => {
+            // Matching the css url("blah") function contents here.
+            forEachMatch(val, cssUrlRegex(), (matches, start) => {
                 const url = matches[1];
-                pushUrl({ urlTo: url, styleName: [styleName], isAsset: true, }, el);
+
+                const styleName = getStyleName(val, start);
+                pushUrl({ urlTo: url, styleName: [styleName], isAsset: true }, el);
             });
         }
+
+        sendLog("collected from styles");
     }
 
-    // stylesheets
-    for (const el of document.getElementsByTagName("style")) {
-        const val = el.textContent;
-        if (!val) {
-            continue;
-        }
-
-        // Matching the css url("blah") function contents here.
-        forEachMatch(val, cssUrlRegex(), (matches, start) => {
-            const url = matches[1];
-
-            const styleName = getStyleName(val, start);
-            pushUrl({ urlTo: url, styleName: [styleName], isAsset: true }, el);
-        });
-    }
-
-    sendLog("collected from styles");
 
     // all text
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
         const val = walker.currentNode.textContent;
         if (!val) {
+            continue;
+        }
+
+        const parentEl = walker.currentNode.parentElement;
+        let parentElType = undefined;
+
+        // name is actually a mistype. I really want to know if its a div or script or whatever.
+        if (parentEl?.tagName) {
+            parentElType = parentEl?.tagName.toUpperCase();
+        }
+
+        let isAsset = undefined;
+        if (
+            parentElType === "SCRIPT" ||
+            parentElType === "STYLE" ||
+            val.length > 3000   // source for length of 3000 as the asset cutoff: I made it tf up
+        ) {
+            isAsset = true;
+        }
+
+        if (isAsset && !enabledFlags.deepCollect) {
             continue;
         }
 
@@ -374,21 +410,6 @@ function getLinks(): LinkQueryResult[] | undefined {
             const prefix = start-CONTEXT > 0 ? "..." : "";
             const suffix = start+CONTEXT < val.length ? "..." : "";
             const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
-
-            const parentEl = walker.currentNode.parentElement;
-            let parentElType = undefined;
-            // name is actually a mistype. I really want to know if its a div or script or whatever.
-            if (parentEl?.tagName) {
-                parentElType = parentEl?.tagName.toUpperCase();
-            }
-
-            let isAsset = undefined;
-            if (
-                parentElType === "SCRIPT" ||
-                parentElType === "STYLE"
-            ) {
-                isAsset = true;
-            }
 
             pushUrl({ 
                 urlTo: url, 
@@ -442,8 +463,12 @@ const popupRoot = rg.if(() => !!currentMessage, (rg) => div({
 ]));
 
 function renderPopup() {
-    document.body.appendChild(popupRoot.el);
-    rg.render();
+    if (isEnabled()) {
+        document.body.appendChild(popupRoot.el);
+        rg.render();
+    } else {
+        popupRoot.el.remove();
+    }
 }
 
 init();

@@ -1,9 +1,10 @@
 import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import browser from "webextension-polyfill";
 import { renderContext } from './render-context';
-import { getCurrentTab, getTheme, onStateChange, sendMessageToCurrentTab, setTheme } from './state';
+import { getCurrentTab, getTheme, sendMessageToCurrentTab, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
+import { onStateChange } from './default-storage-area';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")

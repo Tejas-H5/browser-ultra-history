@@ -1,10 +1,11 @@
 import { appendChild, div, el, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import { NetworkGraph } from './network-graph';
-import { getAllData, getRecentlyVisitedUrls, getTheme, onStateChange, setTheme } from './state';
+import { getAllData, getRecentlyVisitedUrls, getTheme, setTheme } from './state';
 import { TopBar } from './top-bar';
-import { LinkItem, UrlExplorer } from './url-explorer';
+import { LinkItem } from './url-explorer';
 import { newRefetcher } from './utils/refetcher';
 import { CollectedUrlsViewer } from './collected-urls-viewer';
+import { onStateChange } from './default-storage-area';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")

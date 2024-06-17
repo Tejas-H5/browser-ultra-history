@@ -1,8 +1,9 @@
 import { setCssVars } from "src/utils/dom-utils";
 import browser, { browserAction } from "webextension-polyfill";
 import { logTrace } from "./utils/log";
-
-const defaultStorageArea = browser.storage.local;
+import { newTimer } from "./utils/perf";
+import { newAwaiter } from "./utils/async-utils";
+import { clearKeys, getKeys, removeKey, setKeys } from "./default-storage-area";
 
 declare global {
     const process: {
@@ -121,7 +122,7 @@ export async function sendMessageToTabs(message: Message, specificTabs?: TabId[]
 
 
 export async function getStateJSON() {
-    const state = await defaultStorageArea.get();
+    const state = await getAllData();
     return JSON.stringify(state);
 }
 
@@ -136,17 +137,39 @@ export async function loadStateJSON(json: string) {
     return obj;
 }
 
-export async function getIsDisabled() {
-    const { isDisabled } = await defaultStorageArea.get("isDisabled")
-    return isDisabled;
+export type EnabledFlags = {
+    extension: boolean;
+    deepCollect: boolean;
 }
 
-export async function setIsDisabled(isDisabled: boolean) {
-    return await defaultStorageArea.set({ isDisabled });
+const DEFAULT_ENABLED_FLAGS: EnabledFlags = {
+    extension: true,
+    // some of these collections are frankly unnecessary and cause a lot of lag for regular use.
+    // only turn this on if you want to have some fun!
+    deepCollect: false,
+}
+
+export async function getEnabledFlags(): Promise<EnabledFlags> {
+    let { enabledFlags } = await getKeys("enabledFlags")
+
+    // set defaults if they aren't already set.
+    enabledFlags = enabledFlags || {};
+    for (const flag in DEFAULT_ENABLED_FLAGS) {
+        if (!(flag in enabledFlags)) {
+            // @ts-expect-error trust me bro
+            enabledFlags[flag] = DEFAULT_ENABLED_FLAGS[flag];
+        }
+    }
+
+    return enabledFlags || {};
+}
+
+export async function setEnabledFlags(enabledFlags: EnabledFlags) {
+    return await setKeys({ enabledFlags });
 }
 
 export async function getTheme(): Promise<AppTheme> {
-    const { theme } = await defaultStorageArea.get("theme");
+    const { theme } = await getKeys("theme");
     if (theme === "Dark") {
         return "Dark";
     }
@@ -155,7 +178,7 @@ export async function getTheme(): Promise<AppTheme> {
 };
 
 export async function setTheme(theme: AppTheme) {
-    await defaultStorageArea.set({ theme });
+    await setKeys({ theme });
 
     if (theme === "Light") {
         setCssVars([
@@ -183,7 +206,7 @@ export async function setTheme(theme: AppTheme) {
 
 export async function clearAllData() {
     logTrace("Clearing all data...");
-    await defaultStorageArea.clear();
+    await clearKeys();
     logTrace("Cleared!");
 
     browserAction.setBadgeText({ text: "0" });
@@ -197,6 +220,8 @@ export function isUrlKey(key: string) {
     return key.startsWith("#u:");
 }
 
+export const OUT_PREFIX = "#o:";
+
 // an array with a list of urls that linked to this one
 export function getAdjOutgoingKey(url: string) {
     return OUT_PREFIX + url;
@@ -206,7 +231,8 @@ export function isOutKey(key: string) {
     return key.startsWith(OUT_PREFIX);
 }
 
-export const OUT_PREFIX = "#o:";
+
+export const IN_PREFIX = "#i:";
 
 // an array with a list of urls that this one links to
 export function getAdjIncomingKey(url: string) {
@@ -217,25 +243,23 @@ export function isInKey(key: string) {
     return key.startsWith(IN_PREFIX);
 }
 
-export const IN_PREFIX = "#i:";
-
 export function getLinkKey(fromUrl: string, toUrl: string) {
     return "#l:" + fromUrl + ">-->" + toUrl;
 }
 
 export async function getUrlInfo(urlKey: string): Promise<UrlInfo | undefined> {
-    const data = await defaultStorageArea.get(urlKey);
+    const data = await getKeys(urlKey);
     return data[urlKey] as UrlInfo | undefined;
 }
 
 export async function getLinkInfo(linkKey: string): Promise<LinkInfo | undefined> {
-    const data = await defaultStorageArea.get(linkKey);
+    const data = await getKeys(linkKey);
     return data[linkKey] as LinkInfo | undefined;
 }
 
 export async function setLinkMetadata(urlFrom: string, urlTo: string, metadata: LinkInfo) {
     const key = getLinkKey(urlFrom, urlTo);
-    await defaultStorageArea.set({ [key]: metadata });
+    await setKeys({ [key]: metadata });
 }
 
 // TODO: compress these keys somehow, maybe just as arrays, before saving the JSON.
@@ -283,27 +307,20 @@ export function newLinkInfo(info: Omit<LinkInfo, "visitedAt">, visitedAt = new D
 }
 
 export async function getUrlsFrom(adjKey: string): Promise<string[]> {
-    const data = await defaultStorageArea.get(adjKey);
+    const data = await getKeys(adjKey);
     return data[adjKey] || [];
 }
 
-function mergeAdjacencies(existing: string[], incoming: string[]) {
-    for (const incomingUrl of incoming) {
-        if (existing.includes(incomingUrl)) {
-            continue;
-        }
-
-        existing.push(incomingUrl);
-    }
-
-    return existing;
+function mergeAdjacencies(existing: string[], incoming: string[]): string[] {
+    // NOTE: the ?? [] is just to appease typescript, it should never run.
+    return mergeArrays(existing, incoming) ?? [];
 }
 
 export async function saveUrlInfo(info: UrlInfo): Promise<boolean> {
     const urlKey = getUrlKey(info.url);
     const existing = await getUrlInfo(urlKey);
     if (!existing) {
-        await defaultStorageArea.set({ [urlKey]: info});
+        await setKeys({ [urlKey]: info});
         return true;
     }
 
@@ -311,7 +328,7 @@ export async function saveUrlInfo(info: UrlInfo): Promise<boolean> {
     return false;
 }
 
-function mergeArrays<T>(a: undefined | T[], b: undefined | T[]) {
+function mergeArrays(a: undefined | string[], b: undefined | string[]) {
     if(!a && !b) {
         return undefined;
     }
@@ -324,36 +341,134 @@ function mergeArrays<T>(a: undefined | T[], b: undefined | T[]) {
         return a;
     }
 
-    for (const el of b) {
-        if (!a.includes(el)) {
-            a.push(el);
+    return [...new Set<string>([...a, ...b])];
+}
+
+// checks if two string arrays are equal in contents. will sort them in place for the final comparison.
+// for some reason, writing data to the local storage area is VERY expensive (can take several seconds), so
+// we need to minimize the number of writes as much as possible, including only writing stuff if it changed.
+function compareArrays(arr1: string[] | undefined, arr2: string[] | undefined): boolean {
+    if (arr1 === undefined && arr2 === undefined) {
+        return true;
+    }
+
+    if ( arr1 === undefined || arr2 === undefined) {
+        return false;
+    }
+
+    if(arr1.length !== arr2.length) {
+        return false;
+    }
+
+    arr1.sort((a, b) => a.localeCompare(b));
+    arr2.sort((a, b) => a.localeCompare(b));
+
+    for (let i = 0; i < arr1.length; i++) {
+        if (arr1[i] !== arr2[i]) {
+            return false;
         }
     }
 
-    return a;
+    return true;
 }
 
 export async function saveLinkInfo(urlFrom: string, linkInfo: LinkInfo) {
+    linkInfo.urlFrom = urlFrom;
     const linkKey = getLinkKey(urlFrom, linkInfo.urlTo);
     const existing = await getLinkInfo(linkKey);
     if (!existing) {
-        await defaultStorageArea.set({ [linkKey]: linkInfo });
+        await setKeys({ [linkKey]: linkInfo });
         return;
     }
 
-    existing.styleName = mergeArrays(existing.styleName, linkInfo.styleName);
-    existing.attrName = mergeArrays(existing.attrName, linkInfo.attrName);
-    existing.contextString = mergeArrays(existing.contextString, linkInfo.contextString);
-    existing.linkText = mergeArrays(existing.linkText, linkInfo.linkText);
-    existing.linkImage = mergeArrays(existing.linkImage, linkInfo.linkImage);
-    existing.linkText = mergeArrays(existing.linkText, linkInfo.linkText);
-    existing.parentType = mergeArrays(existing.parentType, linkInfo.parentType);
+    if (linkInfo.urlTo !== existing.urlTo ||
+        linkInfo.urlFrom !== existing.urlFrom) {
+        console.log("CRITICAL", linkInfo.urlFrom, linkInfo.urlTo, existing.urlFrom, existing.urlTo);
+        throw new Error("critical error!!");
+    }
+
+    const newLinkInfo: LinkInfo = {
+        urlTo: existing.urlTo,
+        urlFrom: existing.urlFrom,
+        visitedAt: existing.visitedAt,
+
+        redirect: linkInfo.redirect || existing.redirect,
+        isAsset: linkInfo.isAsset || existing.isAsset,
+
+        linkText: mergeArrays(existing.linkText, linkInfo.linkText),
+        parentType: mergeArrays(existing.parentType, linkInfo.parentType),
+        styleName: mergeArrays(existing.styleName, linkInfo.styleName),
+        attrName: mergeArrays(existing.attrName, linkInfo.attrName),
+        contextString: mergeArrays(existing.contextString, linkInfo.contextString),
+        linkImage: mergeArrays(existing.linkImage, linkInfo.linkImage),
+    };
 
     if (linkInfo.isAsset === true) {
         existing.isAsset = true
     }
 
-    await defaultStorageArea.set({ [linkKey]: existing });
+    let changed = false;
+    for (const key in newLinkInfo) {
+        // NOTE: frequently changing data like visitedAt might have to be stored separately,
+        // so that we don't keep saving  mostly the same metatadata blob
+        if (key === "urlTo" || key === "urlFrom" || key === "visitedAt") {
+            continue;
+        }
+
+        // @ts-expect-error trust me bro
+        const newValue: any = newLinkInfo[key];
+        // @ts-expect-error trust me bro
+        const existingValue : any = existing[key];
+
+        if (newValue === existingValue) {
+            continue;
+        }
+
+        if (existingValue === undefined && newValue !== undefined) {
+            console.log("link metadata changed!", key);
+            changed = true;
+            break;
+        }
+
+        if (Array.isArray(existingValue) && Array.isArray(newValue)) {
+            if (compareArrays(existingValue, newValue)) {
+                continue;
+            }
+
+            console.log("link metadata changed!", key, existingValue, newValue);
+            changed = true;
+            break;
+        }
+
+        // the code shouldn't ever reach here, but it might (developer skill issue)
+        console.warn("unhandled case: ", existingValue, newValue, Array.isArray(existingValue), Array.isArray(newValue));
+        changed = true;
+        break;
+    }
+
+    if (changed) {
+        await setKeys({ [linkKey]: newLinkInfo });
+    }
+}
+
+export async function saveOutgoingUrls(urlFrom: string, urls: string[]) {
+    const urlOutLinksKey = getAdjOutgoingKey(urlFrom);
+    const existing = await getUrlsFrom(urlOutLinksKey);
+
+    const mergedAdj = mergeAdjacencies(existing, urls);
+    if (!compareArrays(mergedAdj, existing)) {
+        await setKeys({ [urlOutLinksKey]: mergedAdj });
+    }
+}
+
+export async function saveIncomingUrls(urls: string[], urlTo: string) {
+    const newOutgoingIncomingKey = getAdjIncomingKey(urlTo);
+    const existing = await getUrlsFrom(newOutgoingIncomingKey);
+    
+    const mergedAdj = mergeAdjacencies(existing, urls);
+    if (!compareArrays(mergedAdj, existing)) {
+        await setKeys({ [newOutgoingIncomingKey]: mergedAdj });
+    }
 }
 
 export async function saveOutgoingLinks(
@@ -369,57 +484,93 @@ export async function saveOutgoingLinks(
 
     let numNewUrls = 0;
 
-    await defaultStorageArea.set({ currentVisibleUrls });
+    const timer = newTimer();
+
+
+    const awaiter = newAwaiter();
+
+    timer.logTime("saving urls...");
+
+    awaiter(
+        () => setKeys({ currentVisibleUrls })
+    );
+
+    timer.logTime("saving url infos...");
 
     // save the url infos
     {
-        await saveUrlInfo(newUrlInfo({ url: currentTablUrl }));
+        awaiter(
+            () => saveUrlInfo(newUrlInfo({ url: currentTablUrl }))
+        );
+
         for (const link of outgoingLinks) {
-            const isNew = await saveUrlInfo(newUrlInfo({ url: link.urlTo }));
-            if (isNew) {
-                numNewUrls += 1;
-            }
+            awaiter(async () => {
+                const isNew = await saveUrlInfo(newUrlInfo({ url: link.urlTo }));
+                if (isNew) {
+                    numNewUrls += 1;
+                }
+            })
         }
     }
+
+    timer.logTime("saving link metadatas...");
 
     // save the link metadata
     {
         for (const link of outgoingLinks) {
-            await saveLinkInfo(currentTablUrl, link);
+            awaiter(
+                () => saveLinkInfo(currentTablUrl, link)
+            );
         }
     }
 
+    timer.logTime("saving adjacencies...");
+
     // save the adjacency info we can use to find incoming and outgoing links for a particular url
     {
-        const urlOutLinksKey = getAdjOutgoingKey(currentTablUrl);
-        const urlOutLinks = await getUrlsFrom(urlOutLinksKey);
         const urlOutLinksNew: string[] = outgoingLinks.map(info => info.urlTo);
-
-        const mergedAdj = mergeAdjacencies(urlOutLinks, urlOutLinksNew);
-
-        const savePayload: Record<string, string[]> = {
-            [urlOutLinksKey]: mergedAdj,
-        };
+        awaiter(
+            () => saveOutgoingUrls(currentTablUrl, urlOutLinksNew)
+        );
 
         for (const newOutgoingUrl of urlOutLinksNew) {
-            const newOutgoingIncomingKey = getAdjIncomingKey(newOutgoingUrl);
-            const newOutgoingIncoming = await getUrlsFrom(newOutgoingIncomingKey);
-
-            const mergedAdj = mergeAdjacencies(newOutgoingIncoming, [ currentTablUrl ]);
-
-            savePayload[newOutgoingIncomingKey] = mergedAdj;
+            awaiter(
+                () => saveIncomingUrls([currentTablUrl], newOutgoingUrl)
+            );
         }
+    }
 
-        await defaultStorageArea.set(savePayload);
+    timer.logTime("awaiting all tasks in parallel...")
+
+    const results = await awaiter.allSettled();
+
+    timer.logTime("collating errors from tasks ...", awaiter.tasks.length);
+
+    let successful = 0;
+    let errorReasons: string[] = [];
+    for (const res of results) {
+        if (res.status === "rejected") {
+            errorReasons.push(res.reason);
+        } else {
+            successful += 1;
+        }
+    }
+
+    if (errorReasons.length > 0) {
+        console.log("Some errors have occured while saving: ", [...new Set(errorReasons)]);
     }
 
     if (currentTablUrl) {
         const tabs = await browser.tabs.query({ url: currentTablUrl });
         const tabId = tabs[0]?.id;
         if (tabs.length > 0 && tabId) {
-            sendMessageToTabs({ type: "save_urls_finished", numNewUrls, id: currentTablUrl  }, tabId ? [{ tabId }] : undefined);
+            timer.logTime("notifying the current tab...");
+            
+            await sendMessageToTabs({ type: "save_urls_finished", numNewUrls, id: currentTablUrl  }, tabId ? [{ tabId }] : undefined);
         }
     }
+
+    timer.stop();
 }
 
 type UrlBeforeRedirectData = {
@@ -434,16 +585,16 @@ export function getTabKey(tabId: TabId): string {
 export async function setUrlBeforeRedirect(tabId: TabId, data: UrlBeforeRedirectData | undefined) {
     const key = getTabKey(tabId) + "redirectTempPersistance";
     if (!data) {
-        await defaultStorageArea.remove(key);
+        await removeKey(key);
     } else {
-        await defaultStorageArea.set({ [key]: data });
+        await setKeys({ [key]: data });
     }
 }
 
 export async function getUrlBeforeRedirect(currentTabId: TabId, currentTimestamp: number) {
     const key = getTabKey(currentTabId) + "redirectTempPersistance";
 
-    const data = await defaultStorageArea.get(key);
+    const data = await getKeys(key);
     const redirectTempPersistance = data[key];
     if (!redirectTempPersistance) {
         return undefined;
@@ -461,12 +612,12 @@ export async function getUrlBeforeRedirect(currentTabId: TabId, currentTimestamp
 }
 
 export async function getRecentlyVisitedUrls(): Promise<string[]> {
-    const { recentlyVisitedUrls } = await defaultStorageArea.get("recentlyVisitedUrls");
-    return recentlyVisitedUrls || [];
+    const { recentlyVisitedurls } = await getKeys(["recentlyVisitedUrls"]);
+    return recentlyVisitedurls || [];
 }
 
 export async function saveRecentlyVisitedUrls(urls: string[]) {
-    await defaultStorageArea.set({ recentlyVisitedUrls: urls });
+    await setKeys({ recentlyVisitedUrls: urls });
 }
 
 export async function collectUrlsFromTabs() {
@@ -498,7 +649,7 @@ function getCurrentLocationDataKeys(windowLocationHref: string) {
 
 export async function getCurrentLocationData(windowLocationHref: string): Promise<CurrentLocationData> {
     const keys = getCurrentLocationDataKeys(windowLocationHref);
-    const data = await defaultStorageArea.get(Object.values(keys));
+    const data = await getKeys(Object.values(keys));
 
     const currentVisibleUrls: string[] = data[keys.currentVisibleKeys] || [];
 
@@ -507,10 +658,10 @@ export async function getCurrentLocationData(windowLocationHref: string): Promis
     const outgoing: string[] = data[keys.outgoingKey] || [];
     
     const adjKeysIn = incoming.map(inUrl => getLinkKey(inUrl, windowLocationHref));
-    const adjKeysInData: Record<string, LinkInfo> = await defaultStorageArea.get(adjKeysIn);
+    const adjKeysInData: Record<string, LinkInfo> = await getKeys(adjKeysIn);
 
     const adjKeysOut = outgoing.map(outUrl => getLinkKey(windowLocationHref, outUrl));
-    const adjKeysOutData: Record<string, LinkInfo> = await defaultStorageArea.get(adjKeysOut);
+    const adjKeysOutData: Record<string, LinkInfo> = await getKeys(adjKeysOut);
 
     return {
         metadata,
@@ -527,16 +678,9 @@ export type CurrentLocationData = {
     currentVisibleUrls: string[];
 }
 
-export function onStateChange(fn: () => void) {
-    defaultStorageArea.onChanged.addListener(() => {
-        fn();
-    });
-}
-
 export async function getAllData(): Promise<any> {
-    return await defaultStorageArea.get(null);
+    return await getKeys(null);
 }
-
 
 const THOUSANDS_SUFFIXES = ["", "k", "m", "b", "t", "q", "s",];
 function formatNumberForBadge(num: number): string {

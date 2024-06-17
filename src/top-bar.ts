@@ -1,52 +1,63 @@
-import { div, init, newComponent, newRenderGroup, on, setClass, setText } from 'src/utils/dom-utils';
-import { makeButton } from './components';
+import { div, newComponent, newRenderGroup, } from 'src/utils/dom-utils';
 import { openExtensionTab } from './open-pages';
-import { clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getIsDisabled, getStateJSON, loadStateJSON, setIsDisabled} from './state';
+import { renderContext } from './render-context';
+import { SmallButton } from './small-button';
+import { EnabledFlags, clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getEnabledFlags, getStateJSON, loadStateJSON, setEnabledFlags } from './state';
 import { loadFile, saveText } from './utils/file-download';
+import { newRefetcher } from './utils/refetcher';
 
-
-async function toggleDisabled(rerender: () => void) {
-    const isDisabled = await getIsDisabled();
-    await setIsDisabled(!isDisabled);
-    rerender();
-}
 
 export function TopBar(isMain: boolean) {
     const rg = newRenderGroup();
-    const enableDisableButton = on(makeButton("Disabled"), "click", () => toggleDisabled(render));
     const root = div({ class: "row sb1b", style: "gap: 3px" }, [
-        rg(enableDisableButton, async (el) => {
-            const isDisabled = await getIsDisabled();
-            setClass(el, "inverted", !isDisabled);
-            setText(el, isDisabled ? "Collection Disabled" : "Collection Enabled");
-        }),
+        rg.cArgs(SmallButton(), () => ({
+            text: enabledFlags.extension ? "Active" : "Disabled",
+            title: "Enable or disable url collection activities. Though disabled, you will still be able to traverse what you've collected",
+            onClick: async () => {
+                enabledFlags.extension = !enabledFlags.extension;
+                await setEnabledFlags(enabledFlags);
+                refetcher.refetch();
+            },
+            toggled: enabledFlags.extension,
+        })),
+        rg.cArgs(SmallButton(), () => ({
+            text: "Deep collect",
+            title: "Some of these collection strategies are frankly unnecessary and cause a lot of lag for regular use. Only enable this on if you want to have some fun!",
+            onClick: async () => {
+                enabledFlags.deepCollect = !enabledFlags.deepCollect;
+                await setEnabledFlags(enabledFlags);
+                refetcher.refetch();
+            },
+            // extension MUST be on for any of the other flags to take effect.
+            toggled: (enabledFlags.extension && enabledFlags.deepCollect),
+        })),
         !isMain && (
-            init(makeButton("Collect from this tab"), (button) => {
-                button.el.addEventListener("click", async () => {
+            rg.cArgs(SmallButton(), () => ({
+                text: "Collect from this tab",
+                onClick: async () => {
                     await collectUrlsFromActiveTab();
-                    render();
-                });
-            })
+                    refetcher.refetch();
+                }
+            }))
         ),
         isMain && (
-            init(makeButton("Collect all tabs"), (button) => {
-                button.el.addEventListener("click", async () => {
+            rg.cArgs(SmallButton(), () => ({
+                text: "Collect from all tab",
+                onClick: async () => {
                     await collectUrlsFromTabs();
-                    render();
-                });
-            })
+                    refetcher.refetch();
+                }
+            }))
         ),
-        ...(!isMain ? [] : [
-            (
-                init(makeButton("Clear"), (button) => {
-                    button.el.addEventListener("click", async () => {
-                        await clearAllData();
-                        render();
-                    });
-                })
-            ),
-        ]),
-
+        !isMain && (
+            rg.cArgs(SmallButton(), () => ({
+                text: "Clear",
+                onClick: async () => {
+                    await clearAllData();
+                    refetcher.refetch();
+                }
+            }))
+        ),
 
         div({ class: "flex-1" }),
 
@@ -55,20 +66,24 @@ export function TopBar(isMain: boolean) {
         div({ class: "flex-1" }),
 
         ...(!isMain ? [
-            init(makeButton("Open Extension Tab"), (button) => {
-                button.el.addEventListener("click", async () => {
+            rg.cArgs(SmallButton(), () => ({
+                text: "Open Extension Tab",
+                onClick: async () => {
                     await openExtensionTab();
-                });
-            })
+                    refetcher.refetch();
+                }
+            })),
         ] : [
-            init(makeButton("Save JSON"), (button) => {
-                button.el.addEventListener("click", async () => {
+            rg.cArgs(SmallButton(), () => ({
+                text: "Save JSON",
+                onClick: async () => {
                     const jsonString = await getStateJSON();
                     saveText(jsonString, "Browser-Graph-State-" + Date.now() + ".json");
-                });
-            }),
-            init(makeButton("Load JSON"), (button) => {
-                button.el.addEventListener("click", async () => {
+                }
+            })),
+            rg.cArgs(SmallButton(), () => ({
+                text: "Load JSON",
+                onClick: async () => {
                     loadFile((file) => {
                         if (!file) {
                             return;
@@ -78,31 +93,31 @@ export function TopBar(isMain: boolean) {
                             loadStateJSON(text);
                         });
                     });
-                });
-            })
+                }
+            })),
         ]),
     ]);
 
-    let loading = false;
-    let count = 0;
+    let firstRefetch = false;
+    const component = newComponent(root, () => rerenderAsync());
 
-    const component = newComponent(root, render);
+    let enabledFlags: EnabledFlags = { 
+        extension: false,
+        deepCollect: false, 
+    };
 
-    async function refetch() {
+    const refetcher = newRefetcher(render, async () => {
+        enabledFlags = await getEnabledFlags();
+        firstRefetch = true;
+    });
+
+    function render() {
+        rg.render();
     }
 
-    async function render() {
-        loading = true;
-        rg.render();
-
-        try {
-            await refetch();
-        } catch(e) {
-            // TODO: push an error notification here
-            count = 0;
-        } finally {
-            loading = false;
-            rg.render();
+    async function rerenderAsync() {
+        if (!firstRefetch  || renderContext.forceRefetch) {
+            await refetcher.refetch();
         }
     }
 

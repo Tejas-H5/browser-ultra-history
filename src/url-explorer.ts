@@ -1,4 +1,5 @@
 import { renderContext } from "./render-context";
+import { SmallButton } from "./small-button";
 import { CurrentLocationData, LinkInfo, getCurrentLocationData, getCurrentTabUrl, getLinkInfo, getLinkKey, getRecentlyVisitedUrls } from "./state";
 import { __experimental__inlineComponent, div, divClass, el, newComponent, newRenderGroup, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
 import { newRefetcher } from "./utils/refetcher";
@@ -192,43 +193,6 @@ function UrlList()  {
 
     return c;
 }
-
-const cnSmallButton = sg.makeClass("small-button", [
-    ` { color: var(--fg-color); background-color: var(--bg-color); }`,
-    `:hover { cursor:pointer; background-color: var(--bg-color-focus) }`,
-    `.inverted { color: var(--bg-color); background-color: var(--fg-color); }`,
-    `.radius { border: 2px solid black; border-radius: 5px; padding: 0 10px; }`,
-]);
-
-export function SmallButton() {
-    type Args = {
-        text: string;
-        onClick(): void;
-
-        // optional effects
-        toggled?: boolean;
-        noBorderRadius?: boolean;
-    };
-
-    const rg = newRenderGroup();
-    const root = div({ class: cnSmallButton }, [
-        rg.text(() => c.args.text)
-    ])
-
-    on(root, "click", () => {
-        c.args.onClick();
-    });
-
-    const c = newComponent<Args>(root, render);
-    function render() {
-        rg.render();
-        setClass(root, "inverted", c.args.toggled === true);
-        setClass(root, "radius", c.args.noBorderRadius !== true);
-    }
-
-    return c;
-}
-
 
 const cnTextInput = sg.makeClass("text-input", [
     `{ color: var(--fg-color); background-color: var(--bg-color); }`,
