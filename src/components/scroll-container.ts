@@ -1,17 +1,16 @@
-import { Insertable, div, newComponent, on, scrollIntoViewV } from "src/utils/dom-utils";
+import { Insertable, div, newComponent, newState, on, scrollIntoViewV } from "src/utils/dom-utils";
 
 export function ScrollContainerV() {
-    type Args = {
-        rescrollMs?: number; 
-        scrollEl: Insertable | null;
-    };
+    const s = newState<{ 
+        rescrollMs?: number, 
+        scrollEl: Insertable<HTMLElement> | null 
+    }>();
 
     const scrollContainer = div({ class: "flex-1", style: "overflow-y: auto;" });
 
     let scrollTimeout = 0;
-    let lastScrollEl : Insertable | null | undefined = undefined;
+    let lastScrollEl : Insertable<HTMLElement> | null | undefined = undefined;
     let lastHeight = 0;
-    const component = newComponent<Args>(scrollContainer, renderScrollContainer);
 
     function scrollToLastElement() {
         clearTimeout(scrollTimeout);
@@ -26,7 +25,7 @@ export function ScrollContainerV() {
     }
 
     function renderScrollContainer() {
-        const { scrollEl } = component.args;
+        const { scrollEl } = s.args;
         let height = scrollContainer.el.clientHeight;
 
         if (
@@ -40,7 +39,7 @@ export function ScrollContainerV() {
     }
 
     on(scrollContainer, "scroll", () => {
-        const { rescrollMs } = component.args;
+        const { rescrollMs } = s.args;
 
         if (!rescrollMs) {
             // We simply won't scroll back to where we were before.
@@ -53,5 +52,5 @@ export function ScrollContainerV() {
         }, rescrollMs);
     });
 
-    return component;
+    return newComponent(scrollContainer, renderScrollContainer, s);
 }

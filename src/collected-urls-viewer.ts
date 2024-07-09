@@ -1,24 +1,28 @@
 import { UrlInfo, isUrlKey } from "./state";
-import { div, newComponent, newRenderGroup } from "./utils/dom-utils";
+import { div, newComponent, newRenderGroup, newState } from "./utils/dom-utils";
 
 function UrlItem() {
+    const s = newState<{ info: UrlInfo | undefined; }>();
+
     const rg = newRenderGroup();
     const root = div({}, [
-        rg.text(() => "URL: " + c.args?.info?.url || "??"),
+        rg.text(() => "URL: " + s.args?.info?.url || "??"),
         rg.text(() => ", "),
-        rg.text(() => "VisitedAt: " + new Date(c.args?.info?.visitedAt || 0).toLocaleDateString()),
+        rg.text(() => "VisitedAt: " + new Date(s.args?.info?.visitedAt || 0).toLocaleDateString()),
     ]);
 
-    const c = newComponent<{info: UrlInfo | undefined}>(root, rg.render);
+    const c = newComponent(root, rg.render, s);
     return c;
 }
 
 // component is in limbo. TODO: finsih or delete
 export function CollectedUrlsViewer() {
+    const s = newState<{ allData: any }>();
+
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 flex-center" }, [
         rg.list(div(), UrlItem, (getNext) => {
-            const data = c.args?.allData;
+            const data = s.args?.allData;
             if (!data) {
                 return;
             }
@@ -35,7 +39,7 @@ export function CollectedUrlsViewer() {
         })
     ]);
 
-    const c = newComponent<{ allData: any }>(root, rg.render);
+    const c = newComponent(root, rg.render, s);
 
     return c;
 }

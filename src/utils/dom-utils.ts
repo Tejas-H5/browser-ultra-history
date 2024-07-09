@@ -1,4 +1,4 @@
-export type Insertable<T extends HTMLElement = HTMLElement> = { 
+export type Insertable<T extends Element = Element> = { 
     el: T;
     _isHidden: boolean;
 };
@@ -45,7 +45,14 @@ export function clearChildren(mountPoint: Insertable) {
  * A little more performant than setting the style directly.
  * Not as fast as memoizing the variables that effect the style, and then setting this directly only when those vars have changed
  */
-export function setStyle<K extends keyof HTMLElement["style"]>(root: Insertable, val: K, style: HTMLElement["style"][K]) {
+export function setStyle<
+    U extends HTMLElement | SVGElement, 
+    // Apparently I can't just do `K extends keyof CSSStyleDeclaration` without type errors. lmao
+    K extends (U extends HTMLElement ? keyof HTMLElement["style"] : keyof SVGElement["style"])
+>(
+    root: Insertable<U>, 
+    val: K, style: U["style"][K]
+) {
     if (root.el.style[val] !== style) {
         root.el.style[val] = style;
     }
@@ -79,7 +86,7 @@ export function setClass(
     return state;
 };
 
-export function setVisibleGroup(state: boolean, groupIf: Insertable[], groupElse?: Insertable[]) {
+export function setVisibleGroup(state: boolean, groupIf: Insertable<HTMLElement | SVGElement>[], groupElse?: Insertable<HTMLElement | SVGElement>[]) {
     for (const i of groupIf) {
         setVisible(i, state);
     }
@@ -89,9 +96,11 @@ export function setVisibleGroup(state: boolean, groupIf: Insertable[], groupElse
             setVisible(i, !state);
         }
     }
+
+    return state;
 }
 
-export function setVisible(component: Insertable, state: boolean | null | undefined): boolean {
+export function setVisible<U extends HTMLElement | SVGElement>(component: Insertable<U>, state: boolean | null | undefined): boolean {
     component._isHidden = !state;
     if (state) {
         component.el.style.setProperty("display", "", "")
@@ -105,7 +114,7 @@ export function setVisible(component: Insertable, state: boolean | null | undefi
 // NOTE: this component will also return false if it hasn't been rendered yet. This is to handle the specific case of
 // when we might want to prevent a global event handler from running if our component isn't visible in a modal.
 // This turns out to be one of the few reasons why I would ever use this method...
-export function isVisible(component: Renderable | Insertable): boolean {
+export function isVisible(component: Renderable<unknown, HTMLElement> | Insertable<HTMLElement>): boolean {
     if (wasHiddenOrUninserted(component)) {
         // if _isHidden is set, then the component is guaranteed to be hidden via CSS. 
         return true;
@@ -128,14 +137,14 @@ export function isVisibleElement(el: HTMLElement) {
     return !!( el.offsetWidth || el.offsetHeight || el.getClientRects().length );
 }
 
-type ComponentPool<T extends Insertable> = {
+type ComponentPool<U extends Element, T extends Insertable<U>> = {
     components: T[];
     lastIdx: number;
     getIdx(): number;
     render(renderFn: (getNext: () => T) => void): void;
 }
 
-type KeyedComponentPool<K, T extends Insertable> = {
+type KeyedComponentPool<K, T extends Insertable<HTMLElement>> = {
     components: Map<K, { c: T, del: boolean }>;
     render(renderFn: (getNext: (key: K) => T) => void): void;
 }
@@ -205,7 +214,7 @@ export function setAttrs<T extends Insertable>(
 export function addChildren<T extends Insertable>(ins: T, children: ChildList): T {
     const element = ins.el;
 
-    if (typeof children === "string") {
+    if (!Array.isArray(children)) {
         children = [children];
     }
 
@@ -227,18 +236,48 @@ export function addChildren<T extends Insertable>(ins: T, children: ChildList): 
 
     return ins;
 }
+/**
+ * Used to create svg elements, since {@link el} won't work for those.
+ * {@link type} needs to be lowercase for this to work as well.
+ *
+ * Hint: the `g` element can be used to group SVG elements under 1 DOM node. It's basically the `div` of the SVG world, and
+ * defers me from having to implement something like React fragments for 1 more day...
+ */
+export function elSvg<T extends SVGElement>(
+    type: string,
+    attrs?: Attrs,
+    children?: ChildList,
+) {
+    const xmlNamespace = "http://www.w3.org/2000/svg";
+    const svgEl = document.createElementNS(xmlNamespace, type) as T;
+    if (type === "svg") {
+        // Took this from https://stackoverflow.com/questions/8215021/create-svg-tag-with-javascript
+        // Not sure if actually needed
+        svgEl.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:xlink", "http://www.w3.org/1999/xlink");
+        svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    }
+    return elInternal<T>(svgEl, attrs, children);
+}
 
 /**
- * Creates an element, gives it some attributes, then appends it's children.
- * This is all you need for 99.9% of web dev use-cases
+ * Creates an HTML element with the given attributes, and adds chldren.
+ * NOTE: For svg elements, you'll need to use `elSvg`
  */
 export function el<T extends HTMLElement>(
     type: string, 
     attrs?: Attrs,
     children?: ChildList,
 ): Insertable<T> {
-    const element = document.createElement(type);
-    const insertable = newInsertable<T>(element as T);
+    const element = document.createElement(type) as T;
+    return elInternal(element, attrs, children);
+}
+
+function elInternal<T extends Element>(
+    element: T,
+    attrs?: Attrs,
+    children?: ChildList,
+): Insertable<T> {
+    const insertable = newInsertable<T>(element);
 
     if (attrs) {
         setAttrs(insertable, attrs);
@@ -251,11 +290,16 @@ export function el<T extends HTMLElement>(
     return insertable;
 }
 
-export type ChildList = string | (Insertable | string | Insertable[] | false)[];
+type ChildListElement = Insertable<Element> | string | false;
+export type ChildList = ChildListElement | ChildListElement[];
 
 /**
  * Creates a div, gives it some attributes, and then appends some children. 
+ * It was so common to use el("div", ... that I've just made this it's own method.
+ *
  * I use this instead of {@link el} 90% of the time
+ *
+ * NOTE: For svg elements, you'll need to use `elSvg`
  */
 export function div(attrs?: Attrs, children?: ChildList) {
     return el<HTMLDivElement>("DIV", attrs, children);
@@ -287,11 +331,17 @@ function handleRenderingError<T>(root: Insertable, renderFn: () => T | undefined
     } 
 }
 
-export type ComponentList<T extends Insertable> = Insertable & ComponentPool<T>;
+export type ListRenderer<
+    R extends Element, 
+    U extends Element, T extends Insertable<U>,
+> = Insertable<R> & ComponentPool<U, T>;
 
-export type KeyedComponentList<K, T extends Insertable> = Insertable & KeyedComponentPool<K, T>;
+export type KeyedComponentList<K, T extends Insertable<HTMLElement>> = Insertable & KeyedComponentPool<K, T>;
 
-export function newListRenderer<T extends Insertable>(root: Insertable, createFn: () => T): ComponentList<T> {
+export function newListRenderer<
+    R extends Element, 
+    U extends Element, T extends Insertable<U>,
+>(root: Insertable<R>, createFn: () => T): ListRenderer<R, U, T> {
     function getNext() {
         if (renderer.lastIdx > renderer.components.length) {
             throw new Error("Something strange happened when resizing the component pool");
@@ -311,7 +361,7 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
         renderFn?.(getNext);
     }
 
-    const renderer: ComponentList<T> = {
+    const renderer: ListRenderer<R, U, T> = {
         el: root.el,
         get _isHidden() { return root._isHidden; },
         set _isHidden(val: boolean) { root._isHidden = val; },
@@ -346,7 +396,7 @@ export function newListRenderer<T extends Insertable>(root: Insertable, createFn
  * Also I'm thinkig it might make defining simple buttons/interactions a bit simpler, but I haven't found this to be the case just yet.
  */
 export function on<K extends keyof HTMLElementEventMap>(
-    ins: Insertable,
+    ins: Insertable<HTMLElement>,
     type: K, 
     listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
     options?: boolean | AddEventListenerOptions
@@ -357,7 +407,7 @@ export function on<K extends keyof HTMLElementEventMap>(
 
 /** I've found this is very rarely used compared to `on`. Not that there's anything wrong with using this, of course */
 export function off<K extends keyof HTMLElementEventMap>(
-    ins: Insertable,
+    ins: Insertable<HTMLElement>,
     type: K, 
     listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
     options?: boolean | EventListenerOptions,
@@ -368,9 +418,11 @@ export function off<K extends keyof HTMLElementEventMap>(
 
 /**
  * This seems to be a lot slower than the normal list render in a lot of situations, and
- * I can't figure out why. So I would suggest not using this for now
+ * I can't figure out why. So I would suggest not using this for now.
+ * I expect that it would be faster in very specific situations though. 
+ * Can't think of any off the top of my head
  */
-export function newKeyedListRenderer<K, T extends Insertable>(root: Insertable, createFn: () => T): KeyedComponentList<K, T> {
+export function newKeyedListRenderer<K, T extends Insertable<HTMLElement>>(root: Insertable, createFn: () => T): KeyedComponentList<K, T> {
     function getNext(key: K) {
         const block = renderer.components.get(key);
         if (block) {
@@ -444,7 +496,7 @@ function wasHiddenOrUninserted(ins: Insertable) {
 
 function checkForRenderMistake(ins: Insertable) {
     if (!ins.el.parentElement) {
-        console.warn("A component hasn't been inserted into the DOM, but we're trying to do things with it anyway. aborting.");
+        console.warn("A component hasn't been inserted into the DOM, but we're trying to do things with it anyway.");
     }
 }
 
@@ -492,8 +544,41 @@ export function setInputValue(component: InsertableInput, text: string) {
 
 
 type ComponentState<T> = {
-    argsOrNull: T | null;
+    /**
+     * A getter that will assert that the args have actually been set
+     * before returning them. This should be the case in 99% of normal use-cases
+     */
     args: T;
+    /** 
+     * Use this to check if args has been set or not. 
+     * You can't simply check {@link args} because it will throw an exception if
+     * it hasn't been set yet.
+     */
+    hasArgs(): boolean;
+}
+
+/**
+ * Typically used to store and get the last arguments a component got.
+ * Stateless by default.
+ */
+export function newState<T = undefined>(initialValue: T | null = null) {
+    let argsOrNull: T | null = initialValue;
+    const state: ComponentState<T> = {
+        hasArgs() { return argsOrNull !== null },
+        set args(val: T) {
+            argsOrNull = val;
+        },
+        get args() {
+            if (argsOrNull === null) {
+                // If u programmed it right you won't be seeing this error
+                throw new Error("A component must be rendered with Args at least once before it's state can be accessed.");
+            }
+
+            return argsOrNull;
+        }
+    };
+
+    return state;
 }
 
 /** 
@@ -510,27 +595,42 @@ type ComponentState<T> = {
  * It stores args in the `args` object, so that any event listeners can update their behaviours when the main
  * component re-renders.
  *
+ * NOTE: The template types will be inferred by arguments if you're using this thing right.
+ * If you are setting them manually, you're using this method in a suboptimal way that wasn't intended.
+ *
+ * An example of a correct usage:
+ *
+   ```
+   function UserProfile() {
+        const s = newState<{ user: User }>();
+  
+        const rg = newRenderGroup();
+        const root = div({}, [ 
+            div({}, rg.text(() => s.args.user.FirstName + " " + s.args.user.LastName)),
+            div({}, rg.text(() => "todo: implement the rest of this component later")),
+        ]);
+  
+        function render() {
+            rg.render();
+        }
+        
+        // if `s` and `root` are specified and have known types, the type of this component will be correctly inferred.
+        return newComponent(root, render, s);
+   }
+ * ```
+ *
  */
-export function newComponent<T = undefined>(root: Insertable, renderFn: () => void, state?: ComponentState<T>) {
-    if (!state) {
-        state = newComponentState<T>();
-    }
-
-    const component : Renderable<T> = {
+export function newComponent<T, U extends Element>(root: Insertable<U>, renderFn: () => void, s: ComponentState<T> = newState()) {
+    const component : Renderable<T, U> = {
         el: root.el,
         skipErrorBoundary: false,
         get _isHidden() { return root._isHidden; },
         set _isHidden(val: boolean) { root._isHidden = val; },
-        get argsOrNull() {
-            return state.argsOrNull;
-        },
-        get args() {
-            return state.args;
-        },
-        render(argsIn) {
-            checkForRenderMistake(this);
+        state: s,
+        render(args: T) {
+            s.args = args;
 
-            state.argsOrNull = argsIn;
+            checkForRenderMistake(this);
 
             if (component.skipErrorBoundary) {
                 renderFn();
@@ -543,19 +643,23 @@ export function newComponent<T = undefined>(root: Insertable, renderFn: () => vo
     return component;
 }
 
-export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => any) => Renderable) & {
-    render(): void;
+export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => any) => Renderable<unknown, U>) & {
+    render: () => void;
     /** This is actually implemented with a SPAN and not a text node like you may have thought */
-    text(fn: () => string): Renderable;
-    c(renderable: Renderable<undefined>): Renderable;
+    text: (fn: () => string) => Renderable<unknown, HTMLSpanElement>;
+    c: <U extends Element>(renderable: Renderable<unknown, U>) => Renderable<unknown, U>;
+    /** {@link insFn} is a function that gets it's own render group as an input, which will only render if fn() returned true.  */
+    if: <U extends HTMLElement | SVGElement>(fn: () => boolean, insFn: (rg: RenderGroup) => Insertable<U>) => Renderable<unknown, U>;
     /** 
      * only renders the component if argsFn doesn't return undefined. 
      * For components that take in a single `undefined` argument, just use {@link RenderGroup.c}
      */
-    cArgs<T>(renderable: Renderable<T>, argsFn: () => T | undefined): Renderable;
-    list<T extends Insertable>(root: Insertable, Component: () => T, renderFn: (getNext: () => T) => void): Renderable;
-    /** {@link insFn} is a function that gets it's own render group as an input, which will only render if fn() returned true.  */
-    if(fn: () => boolean, insFn: (rg: RenderGroup) => Insertable): Renderable;
+    cArgs: <T, U extends Element>(renderable: Renderable<T, U>, argsFn: () => T | undefined) => Renderable<T, U>;
+    list: <R extends Element, T, U extends Element>(
+        root: Insertable<R>,
+        Component: () => Renderable<T, U>,
+        renderFn: (getNext: () => Renderable<T, U>) => void,
+    ) => ListRenderer<R, Element, Renderable<T, U>>;
 };
 
 /**
@@ -565,9 +669,9 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
  *
  * ```
  * function UserProfileBannerNoRendergroups() {
- *      type Args = {
+ *      const s = newState<{
  *          user: User;
- *      }
+ *      }>();
  *
  *      const nameEl = div();
  *      const infoList = newListRenderer(div(), UserProfileInfoPair);
@@ -580,7 +684,7 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
  *      ]);
  * 
  *      function render() {
- *          const { user } = c.args;
+ *          const { user } = s.args;
  *
  *          setText(nameEl, user.FirstName + " " + user.LastName;
  *
@@ -598,14 +702,13 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
  *          });
  *      }
  *
- *      const c =  newComponent(root, render);
- *      return c;
+ *      return newComponent(root, render, s);
  * }
  *
  * function UserProfileBannerRg() {
- *      type Args = {
+ *      const s = newState<{
  *          user: User;
- *      }
+ *      }>();
  *
  *      const nameEl = div();
  *      const infoList = newListRenderer(div(), UserProfileInfoPair);
@@ -613,8 +716,8 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
  *
  *      const rg = newRenderGroup();
  *      const root = div({}, [
- *          div({}, [ rg.text(() => c.args.user.FirstName + " " + c.args.user.LastName) ]),
- *          div({}, [ rg.text(() => c.args.user.ProfileInfo.Bio) ],
+ *          div({}, [ rg.text(() => s.args.user.FirstName + " " + s.args.user.LastName) ]),
+ *          div({}, [ rg.text(() => s.args.user.ProfileInfo.Bio) ],
  *          rg.list(div(), UserProfileInfoPair, (getNext) => {
  *              // todo: display this info properly
  *              for (const key in user.ProfileInfo) {
@@ -628,8 +731,7 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
  *          })
  *      ]);
  *
- *      const c = newComponent<Args>(root, rg.render);
- *      return c;
+ *      return newComponent(root, rg.render, s);
  * }
  * ```
  *
@@ -643,7 +745,7 @@ export type RenderGroup = (<T extends Insertable>(el: T, updateFn: (el: T) => an
 export function newRenderGroup(): RenderGroup {
     const renderables: Renderable[] =  [];
 
-    const push = <T extends Insertable>(el: T, updateFn: (el: T) => any): Renderable  => {
+    const push = <U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => any): Renderable<unknown, U> => {
         const c = newComponent(el, () => updateFn(el));
         renderables.push(c);
         return c;
@@ -655,27 +757,33 @@ export function newRenderGroup(): RenderGroup {
                 r.render(undefined);
             }
         },
-        text: (fn: () => string): Renderable => {
+        text: (fn: () => string): Renderable<unknown, HTMLSpanElement> => {
             const spanEl = span();
             return push(spanEl, () => setText(spanEl, fn()));
         },
-        c: (renderable: Renderable<undefined>) => {
+        c: <U extends Element>(renderable: Renderable<unknown, U>): Renderable<unknown, U> => {
             renderables.push(renderable);
             return renderable;
         },
-        cArgs: <T>(renderable: Renderable<T>, argsFn: () => T | undefined) => {
-            return push(renderable, () => {
+        cArgs: <T, U extends Element>(renderable: Renderable<T, U>, argsFn: () => T | undefined) => {
+            push(renderable, () => {
                 const args = argsFn();
                 if (args !== undefined) {
                     renderable.render(args);
                 }
             });
+            return renderable;
         },
-        list: <T extends Insertable>(root: Insertable, Component: () => T, renderFn: (getNext: () => T) => void) => {
+        list: <R extends Element, T, U extends Element>(
+            root: Insertable<R>, 
+            Component: () => Renderable<T, U>, 
+            renderFn: (getNext: () => Renderable<T, U>) => void,
+        ): ListRenderer<R, Element, Renderable<T, U>> => {
             const list = newListRenderer(root, Component);
-            return push(list, () => list.render(renderFn));
+            push(list, () => list.render(renderFn));
+            return list;
         },
-        if: (fn: () => boolean, insFn: (rg: RenderGroup) => Insertable) => {
+        if: <U extends HTMLElement | SVGElement>(fn: () => boolean, insFn: (rg: RenderGroup) => Insertable<U>): Renderable<unknown, U> => {
             const c = inlineComponent(insFn);
             return push(c, () => {
                 if (setVisible(c, fn())) {
@@ -688,37 +796,31 @@ export function newRenderGroup(): RenderGroup {
     return rg;
 }
 
-export function newComponentState<T = undefined>() {
-    const state: ComponentState<T> = {
-        argsOrNull: null,
-        get args() {
-            if (state.argsOrNull === null) {
-                throw new Error("Args will always be null before a component is rendered for the first time!");
-            }
 
-            return state.argsOrNull;
-        }
-    };
-
-    return state;
-}
-
-function inlineComponent<T = undefined>(insFunction: (rg: RenderGroup, state: ComponentState<T>) => Insertable) {
+/**
+ * I find that while this is very concise, it's very hard to reason about. 
+ * Render groups seem to give the best bang for buck in terms of simplicity and 
+ * ease of use. (So I would avoid using this for now)
+ */
+function inlineComponent<T = undefined, U extends Element = Element>(
+    insFunction: (rg: RenderGroup, state: ComponentState<T>) => Insertable<U>
+) {
     const rg = newRenderGroup();
-    const state = newComponentState<T>();
-    return newComponent<T>(insFunction(rg, state), rg.render, state);
+    const state = newState<T>();
+    const root = insFunction(rg, state);
+    return newComponent(root, rg.render, state);
 }
 
 export const __experimental__inlineComponent = inlineComponent;
 
-export function newInsertable<T extends HTMLElement>(el: T): Insertable<T> {
+export function newInsertable<T extends Element>(el: T): Insertable<T> {
     return  {
         el,
         _isHidden: false,
     };
 }
 
-export type Renderable<T = undefined> = Insertable & {
+export type Renderable<T = unknown, U extends Element = Element> = Insertable<U> & {
     /**
      * A renderable's arguments will be null until during or after the first render
      * .args is actually a getter that will throw an error if they are null 
@@ -728,12 +830,12 @@ export type Renderable<T = undefined> = Insertable & {
      * ```
      *
      * function Component() {
-     *      type Args = { count: number; }
+     *      const s = newState<{ count: number; }>();
      *      const rg = newRenderGroup();
      *      const div2 = div();
      *
      *      // this works, provider rg.render is only called during or after the first render
-     *      const button = el("button", {}, ["Clicked ", rg.text(() => c.args.count), " time(s)"]);
+     *      const button = el("button", {}, ["Clicked ", rg.text(() => s.args.count), " time(s)"]);
      *
      *      const root = div({}, [
      *          button, 
@@ -741,30 +843,31 @@ export type Renderable<T = undefined> = Insertable & {
      *      ]);
      *
      *      // Runtime error: Args were null!
-     *      setText(div2, "" + c.args.count);   
+     *      setText(div2, "" + s.args.count);   
      *
-     *      const c = newComponent<Args>(root, () => {
-     *          // this works, c.args being called during (at least) the first render.
-     *          const { count } = c.args;
-     *      });
+     *      function render() {
+     *          // this works, s.args being called during (at least) the first render.
+     *          const { count } = s.args;
+     *      }
      *
      *      on(button, "click", () => {
      *          // this works, assuming the component is rendered immediately before the user is able to click the button in the first place.
-     *          const { count } = c.args;
+     *          const { count } = s.args;
      *      });
      *
      *      document.on("keydown", () => {
      *          // this will mostly work, but if a user is holding down keys before the site loads, this will error!
-     *          // You'll etiher have to use c.argsOrNull and check for null, or only add the handler once during the first render 
+     *          // You'll etiher have to use s.argsOrNull and check for null, or only add the handler once during the first render 
      *          // (or something more applicable to your project)
-     *          const { count } = c.args;
+     *          const { count } = s.args;
      *      });
+     *
+     *      return newComponent<Args>(root, render, s);
      * }
      * ```
      */
-    args: T;
-    argsOrNull: T | null;
     render(args: T):void;
+    state: ComponentState<T>;
     skipErrorBoundary: boolean;
 }
 
@@ -791,7 +894,7 @@ export function isEditingTextSomewhereInDocument(): boolean {
  */
 export function scrollIntoViewV(
     scrollParent: HTMLElement, 
-    scrollTo: Insertable, 
+    scrollTo: Insertable<HTMLElement>, 
     scrollToRelativeOffset: number,
 ) {
     const scrollOffset = scrollToRelativeOffset * scrollParent.offsetHeight;

@@ -1,7 +1,7 @@
 import { renderContext } from "./render-context";
 import { SmallButton } from "./small-button";
 import { CurrentLocationData, LinkInfo, getCurrentLocationData, getCurrentTabUrl, getLinkInfo, getLinkKey, getRecentlyVisitedUrls } from "./state";
-import { __experimental__inlineComponent, div, divClass, el, newComponent, newRenderGroup, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
+import { __experimental__inlineComponent, div, divClass, el, newComponent, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
 import { newRefetcher } from "./utils/refetcher";
 
 type UrlStackData = {
@@ -26,7 +26,7 @@ const cnLinkItem = sg.makeClass("linkItem", [
 ]);
 
 export function LinkItem() {
-    type Args = {
+    const s = newState<{
         linkUrl: string;
         onClick(url: string): void;
 
@@ -36,42 +36,40 @@ export function LinkItem() {
         isIncoming?: boolean;
         isAlreadyInPath?: boolean;
         isRecent?: boolean;
-    };
+    }>();
 
     const rg = newRenderGroup();
     const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
-        rg.text(() => c.args.isVisible ? "[Visible] " : ""),
-        rg.text(() => c.args.linkUrl),
+        rg.text(() => s.args.isVisible ? "[Visible] " : ""),
+        rg.text(() => s.args.linkUrl),
     ]);
 
-    const c = newComponent<Args>(root, render);
-
     function canClick() {
-        return !c.args.isAlreadyInPath;
+        return !s.args.isAlreadyInPath;
     }
 
     function render() {
         rg.render();
 
-        setClass(root, "incoming", c.args.isIncoming === true);
-        setClass(root, "outgoing", c.args.isIncoming === false);
-        setClass(root, "alreadyInPath", !!c.args.isAlreadyInPath);
-        setClass(root, "recentlyVisited", !!c.args.isRecent);
+        setClass(root, "incoming", s.args.isIncoming === true);
+        setClass(root, "outgoing", s.args.isIncoming === false);
+        setClass(root, "alreadyInPath", !!s.args.isAlreadyInPath);
+        setClass(root, "recentlyVisited", !!s.args.isRecent);
     }
 
     on(root, "click", () => {
-        const { onClick, linkUrl } = c.args;
+        const { onClick, linkUrl } = s.args;
 
         if (canClick()) {
             onClick(linkUrl);
         }
     });
 
-    return c;
+    return newComponent(root, render, s);
 }
 
 function UrlList()  {
-    type Args = {
+    const s = newState<{
         links: LinkInfo[]; 
         isIncoming: boolean;
         onClick: (url: string) => void;
@@ -81,7 +79,7 @@ function UrlList()  {
         currentlyVisibleUrls: string[];
         filter: UrlListFilter;
         title: string;
-    };
+    }>();
 
     const scrollContainer = div({ 
         class: "nowrap overflow-y-auto", 
@@ -92,18 +90,18 @@ function UrlList()  {
     const root = divClass("flex-1 overflow-x-auto col", {}, [
         div({ class: "row justify-content-center", style: "padding: 0 10px;" }, [
             div({ class: "b" }, [rg.text(() => {
-                const total = c.args.links.length;
+                const total = s.args.links.length;
                 const filtered = filteredSortedLinks.length;
 
                 if (total !== filtered) {
-                    return c.args.title + ": " + filtered + " / " + total;
+                    return s.args.title + ": " + filtered + " / " + total;
                 }
 
-                return c.args.title + ": " + total;
+                return s.args.title + ": " + total;
             })]),
         ]),
         rg.list(scrollContainer, LinkItem, (getNext) => {
-            const { isIncoming, currentUrlsPath, recentlyVisitedUrls, currentlyVisibleUrls } = c.args;
+            const { isIncoming, currentUrlsPath, recentlyVisitedUrls, currentlyVisibleUrls } = s.args;
 
             for (const linkInfo of filteredSortedLinks) {
                 const linkUrl = isIncoming ? linkInfo.urlFrom : linkInfo.urlTo;
@@ -117,7 +115,7 @@ function UrlList()  {
                     // index: i,
 
                     linkUrl,
-                    onClick: c.args.onClick,
+                    onClick: s.args.onClick,
                     isAlreadyInPath,
                     isRecent,
                     linkInfo,
@@ -130,7 +128,7 @@ function UrlList()  {
 
     let filteredSortedLinks: LinkInfo[] = [];
     function recomputeSate() {
-        const { links, isIncoming, recentlyVisitedUrls, filter } = c.args;
+        const { links, isIncoming, recentlyVisitedUrls, filter } = s.args;
 
         filteredSortedLinks.splice(0, filteredSortedLinks.length);
 
@@ -184,14 +182,12 @@ function UrlList()  {
         pushSubset(false);
     }
 
-    const c = newComponent<Args>(root, render);
-
     function render() {
         recomputeSate();
         rg.render();
     }
 
-    return c;
+    return newComponent(root, render, s);
 }
 
 const cnTextInput = sg.makeClass("text-input", [
@@ -200,41 +196,39 @@ const cnTextInput = sg.makeClass("text-input", [
 ]);
 
 export function TextInput() {
-    type Args = {
+    const s = newState<{
         text: string;
         placeholder: string;
         onChange(val: string): void;
-    }
+    }>();
 
     const input = el<HTMLInputElement>("input", { class: cnTextInput })
     const root = div({ class: "row" }, [
         input,
     ]);
 
-    const c = newComponent<Args>(root, render);
-
     function render() {
-        setInputValue(input, c.args.text);
-        setAttr(input, "placeholder", c.args.placeholder);
+        setInputValue(input, s.args.text);
+        setAttr(input, "placeholder", s.args.placeholder);
     }
 
     function onEdit() {
-        c.args.onChange(input.el.value);
+        s.args.onChange(input.el.value);
     }
 
     on(input, "input", onEdit);
     on(input, "blur", onEdit);
 
-    return c;
+    return newComponent(root, render, s);
 }
 
 
 
 export function LinkInfoDetails() {
-    type LinkInfoDetailsArgs = {
+    const s = newState<{
         linkInfo: LinkInfo;
         incoming?: boolean;
-    };
+    }>();
 
     function fmt(str: string[] | undefined) {
         if (!str) {
@@ -249,15 +243,15 @@ export function LinkInfoDetails() {
         div({ class: "row handle-long-words" }, [
             div({}, [
                 rg.text(() => {
-                    if (c.args.incoming === true) {
-                        return "<-- " + c.args.linkInfo.urlFrom;
+                    if (s.args.incoming === true) {
+                        return "<-- " + s.args.linkInfo.urlFrom;
                     }
 
-                    if (c.args.incoming === false) {
-                        return c.args.linkInfo.urlTo + " -->";
+                    if (s.args.incoming === false) {
+                        return s.args.linkInfo.urlTo + " -->";
                     }
                     
-                    return c.args.linkInfo.urlFrom + " --> " + c.args.linkInfo.urlTo;
+                    return s.args.linkInfo.urlFrom + " --> " + s.args.linkInfo.urlTo;
                 })
             ]),
         ]),
@@ -290,7 +284,7 @@ export function LinkInfoDetails() {
                 // [x] rg.text(() => fmt("Attribute", c.args.linkInfo?.attrName)),
                 // [x]rg.text(() => fmt("Style", c.args.linkInfo?.styleName)),
 
-                if (c.args.linkInfo.redirect) {
+                if (s.args.linkInfo.redirect) {
                     getNext().render({
                         alwaysRenderKey: true,
                         key: "This link was created by a redirect.", 
@@ -298,7 +292,7 @@ export function LinkInfoDetails() {
                     });
                 }
 
-                if (c.args.linkInfo.isAsset) {
+                if (s.args.linkInfo.isAsset) {
                     getNext().render({
                         alwaysRenderKey: true,
                         key: "This link should point to an asset.", 
@@ -308,43 +302,42 @@ export function LinkInfoDetails() {
 
                 getNext().render({
                     key: "Link Text", 
-                    value: c.args.linkInfo.linkText,
+                    value: s.args.linkInfo.linkText,
                 });
 
                 // TODO: highlight the url or something. 
                 getNext().render({
                     key: "Surrounding Context", 
-                    value: c.args.linkInfo.contextString,
+                    value: s.args.linkInfo.contextString,
                 });
 
                 getNext().render({
                     key: "[debug] Parent element tag name", 
-                    value: c.args.linkInfo.parentType,
+                    value: s.args.linkInfo.parentType,
                 });
 
 
                 getNext().render({
                     key: "Attributes", 
-                    value: c.args.linkInfo.attrName,
+                    value: s.args.linkInfo.attrName,
                 });
 
                 getNext().render({
                     key: "Styles", 
-                    value: c.args.linkInfo.styleName,
+                    value: s.args.linkInfo.styleName,
                 });
             }
         )
     ]);
 
-    const c = newComponent<LinkInfoDetailsArgs>(root, rg.render);
-    return c;
+    return newComponent(root, rg.render, s);
 }
 
 export function UrlExplorer() {
-    type Args = { 
+    const s = newState<{ 
         onNavigate(url: string): void; 
         onHighlightUrl(url: string): void; 
-    };
+    }>();
 
     function makeSeparator() {
         return div({ style: "height: 1px; background-color: var(--fg-color)" });
@@ -441,11 +434,11 @@ export function UrlExplorer() {
         ]),
     ]);
 
-    const c = newComponent<Args>(root, () => {
-        renderAsync(renderContext.forceRefetch);
-    });
-
     function render() {
+        renderAsync(renderContext.forceRefetch);
+    }
+
+    function renderElements() {
         if (!linkInfoFilter.showPages && !linkInfoFilter.showAssets) {
             // at least one of these must be true...
             linkInfoFilter.showPages = true;
@@ -456,7 +449,7 @@ export function UrlExplorer() {
 
     function renderAction(fn: () => void) {
         fn();
-        render();
+        renderElements();
     }
 
     const linkInfoFilter: UrlListFilter = {
@@ -473,7 +466,7 @@ export function UrlExplorer() {
     let currentLinkInfo: LinkInfo | undefined;
     let currentLinkInfoIsIncoming: boolean;
 
-    const fetchState = newRefetcher(render, async () => {
+    const fetchState = newRefetcher(renderElements, async () => {
         const currentUrl = peekUrls();
         const prevUrl = peekUrlsPrev();
 
@@ -562,7 +555,7 @@ export function UrlExplorer() {
     function navigateToTopOfTabstack() {
         const url = peekUrls();
         if (url) {
-            c.args.onNavigate(url.url);
+            s.args.onNavigate(url.url);
         }
     }
 
@@ -578,8 +571,8 @@ export function UrlExplorer() {
         }
 
         const url = urlStack[1].url;
-        c.args.onHighlightUrl(url);
+        s.args.onHighlightUrl(url);
     }
 
-    return c;
+    return newComponent(root, render, s);
 }

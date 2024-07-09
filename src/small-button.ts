@@ -1,4 +1,4 @@
-import { div, newComponent, newRenderGroup, newStyleGenerator, on, setAttr, setClass } from "./utils/dom-utils";
+import { div, newComponent, newRenderGroup, newState, newStyleGenerator, on, setAttr, setClass } from "./utils/dom-utils";
 
 const sg = newStyleGenerator();
 
@@ -10,7 +10,7 @@ const cnSmallButton = sg.makeClass("small-button", [
 ]);
 
 export function SmallButton() {
-    type Args = {
+    const s = newState<{
         text: string;
         onClick(): void;
 
@@ -18,26 +18,25 @@ export function SmallButton() {
         toggled?: boolean;
         title?: string;
         noBorderRadius?: boolean;
-    };
+    }>();
 
     const rg = newRenderGroup();
     const root = div({ class: cnSmallButton }, [
-        rg.text(() => c.args.text)
+        rg.text(() => s.args.text)
     ])
 
     on(root, "click", () => {
-        c.args.onClick();
+        s.args.onClick();
     });
 
-    const c = newComponent<Args>(root, render);
     function render() {
         rg.render();
-        setClass(root, "inverted", c.args.toggled === true);
-        setClass(root, "radius", c.args.noBorderRadius !== true);
-        setAttr(root, "title", c.args.title);
+        setClass(root, "inverted", s.args.toggled === true);
+        setClass(root, "radius", s.args.noBorderRadius !== true);
+        setAttr(root, "title", s.args.title);
     }
 
-    return c;
+    return newComponent(root, render, s);
 }
 
 
