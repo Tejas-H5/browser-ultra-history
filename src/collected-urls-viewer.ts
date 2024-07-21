@@ -1,4 +1,5 @@
-import { UrlInfo, isUrlKey } from "./state";
+import { isTypeKey } from "./default-storage-area";
+import { URL_SCHEMA, UrlInfo } from "./state";
 import { div, newComponent, newRenderGroup, newState } from "./utils/dom-utils";
 
 function UrlItem() {
@@ -7,8 +8,6 @@ function UrlItem() {
     const rg = newRenderGroup();
     const root = div({}, [
         rg.text(() => "URL: " + s.args?.info?.url || "??"),
-        rg.text(() => ", "),
-        rg.text(() => "VisitedAt: " + new Date(s.args?.info?.visitedAt || 0).toLocaleDateString()),
     ]);
 
     const c = newComponent(root, rg.render, s);
@@ -28,7 +27,7 @@ export function CollectedUrlsViewer() {
             }
 
             for (const k in data) {
-                if (!isUrlKey(k)) {
+                if (!isTypeKey(k, URL_SCHEMA)) {
                     continue;
                 }
 

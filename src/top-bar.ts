@@ -106,9 +106,19 @@ export function TopBar(isMain: boolean) {
         deepCollect: false, 
     };
 
-    const refetcher = newRefetcher(render, async () => {
-        enabledFlags = await getEnabledFlags();
-        firstRefetch = true;
+    const refetcher = newRefetcher({
+        refetch: async () => {
+            render();
+
+            enabledFlags = await getEnabledFlags();
+
+            render();
+
+            firstRefetch = true;
+        }, 
+        onError: () => {
+            render();
+        }
     });
 
     function render() {

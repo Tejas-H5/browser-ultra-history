@@ -1,7 +1,7 @@
 import { forEachMatch, } from "src/utils/re";
-import { EnabledFlags, LinkInfo, getEnabledFlags, newLinkInfo, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
-import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
 import { onStateChange } from "./default-storage-area";
+import { EnabledFlags, UrlInfo, getEnabledFlags, newUrlInfo, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
+import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
 
 declare global {
     interface Window {
@@ -157,10 +157,7 @@ async function collectLinks() {
     currentMessage = "Saving new URLs...";
     renderPopup();
 
-    const visibleUrls = links.filter(result => result.domNode && isVisibleElement(result.domNode))
-            .map(result => result.linkInfo.urlTo);
-
-    await saveOutgoingLinks(tabUrlString, links.map(result => result.linkInfo), visibleUrls);
+    await saveOutgoingLinks(tabUrlString, links.map(result => result.linkInfo));
 }
 
 
@@ -195,7 +192,7 @@ export function highlightPortionOfScreen({top, bottom, left, right} : { top: num
 }
 
 function highlightUrlOnPage(url: string) {
-    const res = lastCollectedUrls.find(result => result.linkInfo.urlTo === url);
+    const res = lastCollectedUrls.find(result => result.linkInfo.url === url);
     const domNode = res?.domNode;
     if (!domNode) {
         currentMessage = "This URL doesn't seem to be on an item on this page";
@@ -246,7 +243,7 @@ function cssUrlRegex() {
 }
 
 type LinkQueryResult = {
-    linkInfo: LinkInfo;
+    linkInfo: UrlInfo;
     domNode?: HTMLElement;
 }
 
@@ -264,15 +261,15 @@ function getLinks(): LinkQueryResult[] | undefined {
     const urls: LinkQueryResult[] = [];
 
     const pushUrl = (
-        urlInfoPartial: Omit<LinkInfo, "visitedAt" | "urlFrom">,
+        urlInfoPartial: UrlInfo,
         domNode: HTMLElement | null | undefined,
     ) => {
-        const linkInfo = newLinkInfo({
+        const linkInfo = newUrlInfo({
             ...urlInfoPartial,
-            urlFrom: tabUrlString,
+            urlFrom: [tabUrlString],
         });
 
-        let url = linkInfo.urlTo;
+        let url = linkInfo.url;
         url = url.trim();
         if (
             !url ||
@@ -285,13 +282,13 @@ function getLinks(): LinkQueryResult[] | undefined {
         try {
             // Convert the URL to an absolute url relative to the current origin.
             const parsed = new URL(url, window.location.origin);
-            linkInfo.urlTo = parsed.href;
+            linkInfo.url = parsed.href;
         } catch {
             // this was an invalid url. dont bother collecting it
             return;
         }
 
-        if (linkInfo.urlTo === window.location.href) {
+        if (linkInfo.url === window.location.href) {
             // ignore self referencials
             return;
         }
@@ -318,7 +315,7 @@ function getLinks(): LinkQueryResult[] | undefined {
             }
 
             pushUrl({ 
-                urlTo: url, 
+                url: url, 
                 attrName: [attr], 
                 linkText: linkText ? [linkText] : undefined, 
                 isAsset,
@@ -347,7 +344,7 @@ function getLinks(): LinkQueryResult[] | undefined {
 
                 forEachMatch(val, cssUrlRegex(), (matches) => {
                     const url = matches[1];
-                    pushUrl({ urlTo: url, styleName: [styleName], isAsset: true, }, el);
+                    pushUrl({ url: url, styleName: [styleName], isAsset: true, }, el);
                 });
             }
         }
@@ -364,7 +361,7 @@ function getLinks(): LinkQueryResult[] | undefined {
                 const url = matches[1];
 
                 const styleName = getStyleName(val, start);
-                pushUrl({ urlTo: url, styleName: [styleName], isAsset: true }, el);
+                pushUrl({ url: url, styleName: [styleName], isAsset: true }, el);
             });
         }
 
@@ -412,7 +409,7 @@ function getLinks(): LinkQueryResult[] | undefined {
             const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
 
             pushUrl({ 
-                urlTo: url, 
+                url: url, 
                 contextString: [contextString], 
                 parentType: !parentElType ? undefined : [parentElType] ,
                 isAsset,

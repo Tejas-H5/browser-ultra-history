@@ -1,11 +1,11 @@
 import { appendChild, div, el, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
+import { CollectedUrlsViewer } from './collected-urls-viewer';
+import { getAllData, onStateChange } from './default-storage-area';
 import { NetworkGraph } from './network-graph';
-import { getAllData, getRecentlyVisitedUrls, getTheme, setTheme } from './state';
+import { getRecentlyVisitedUrls, getTheme, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { LinkItem } from './url-explorer';
 import { newRefetcher } from './utils/refetcher';
-import { CollectedUrlsViewer } from './collected-urls-viewer';
-import { onStateChange } from './default-storage-area';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")
@@ -50,10 +50,24 @@ function App() {
 
     const c = newComponent(appRoot, () => renderAsync());
 
-    const fetchState = newRefetcher(render, async () => {
-        allData = await getAllData();
-        recentUrls = await getRecentlyVisitedUrls();
-        recentUrls.reverse();
+    const fetchState = newRefetcher({
+        refetch: async () => {
+            render();
+
+            allData = await getAllData();
+
+            render();
+
+            recentUrls = await getRecentlyVisitedUrls();
+
+            render();
+
+            recentUrls.reverse();
+
+            render();
+        }, onError: () => {
+            render();
+        }
     });
 
     function render() {

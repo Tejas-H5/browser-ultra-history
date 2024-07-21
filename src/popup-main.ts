@@ -33,7 +33,17 @@ function PopupAppRoot() {
         sendMessageToCurrentTab({ type: "content_highlight_url", url })
     }
 
-    async function onNavigate(urlTo: string) {
+    async function onNavigate(urlTo: string, newTab: boolean) {
+        if (newTab) {
+            await browser.tabs.create({
+                url: urlTo,
+                active: true,
+                index: 10000,
+            });
+
+            return;
+        }
+
         const currentTab = await getCurrentTab();
         if (!currentTab) {
             return;

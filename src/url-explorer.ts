@@ -1,13 +1,8 @@
-import { renderContext } from "./render-context";
+import { getSchemaInstanceFields, pluck, runReadTx } from "./default-storage-area";
 import { SmallButton } from "./small-button";
-import { CurrentLocationData, LinkInfo, getCurrentLocationData, getCurrentTabUrl, getLinkInfo, getLinkKey, getRecentlyVisitedUrls } from "./state";
+import { URL_SCHEMA, UrlInfo, getCurrentTabUrl } from "./state";
 import { __experimental__inlineComponent, div, divClass, el, newComponent, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
 import { newRefetcher } from "./utils/refetcher";
-
-type UrlStackData = {
-    url: string;
-    isIncoming: boolean;
-}
 
 type UrlListFilter = {
     urlContains: string;
@@ -31,7 +26,7 @@ export function LinkItem() {
         onClick(url: string): void;
 
         index?: number;
-        linkInfo?: LinkInfo;
+        linkInfo?: UrlInfo;
         isVisible?: boolean;
         isIncoming?: boolean;
         isAlreadyInPath?: boolean;
@@ -68,19 +63,76 @@ export function LinkItem() {
     return newComponent(root, render, s);
 }
 
+function filterUrls(
+    src: UrlInfo[], 
+    dst: UrlInfo[], 
+    urlHistory: string[],
+    filter: UrlListFilter,
+) {
+    dst.splice(0, dst.length);
+    function contains(thing: string | string[] | undefined, queryStr: string): boolean {
+        if (!thing) {
+            return false;
+        }
+
+        let str = thing;
+        if (Array.isArray(str)) {
+            str = str.join(" ");
+        }
+
+        return str.toLowerCase().includes(queryStr.toLowerCase());
+    }
+
+    function pushSubset(recent: boolean) {
+        for (const linkInfo of src) {
+            const linkUrl = linkInfo.url;
+            const isRecent = urlHistory.includes(linkUrl);
+
+            if (recent !== isRecent) {
+                continue;
+            }
+
+            if (filter.urlContains && (
+                // this one is more important than the others
+                !contains(linkUrl, filter.urlContains) &&
+                !contains(linkInfo.styleName, filter.urlContains) &&
+                !contains(linkInfo.attrName, filter.urlContains) &&
+                !contains(linkInfo.contextString, filter.urlContains) &&
+                !contains(linkInfo.linkText, filter.urlContains) &&
+                !contains(linkInfo.linkImage, filter.urlContains)
+            )) {
+                continue;
+            }
+
+            if (!filter.showAssets && linkInfo.isAsset) {
+                continue;
+            }
+
+            if (!filter.showPages && !linkInfo.isAsset) {
+                continue;
+            }
+
+            dst.push(linkInfo);
+        }
+    }
+
+    pushSubset(true);
+    pushSubset(false);
+}
+
 function UrlList()  {
     const s = newState<{
-        links: LinkInfo[]; 
-        isIncoming: boolean;
+        links: UrlInfo[]; 
         onClick: (url: string) => void;
 
-        currentUrlsPath: UrlStackData[];
+        currentUrl: string | undefined;
         recentlyVisitedUrls: string[];
         currentlyVisibleUrls: string[];
         filter: UrlListFilter;
         title: string;
     }>();
 
+    // TODO: literally use scroll container
     const scrollContainer = div({ 
         class: "nowrap overflow-y-auto", 
         // Need padding for the scrollbar
@@ -101,13 +153,10 @@ function UrlList()  {
             })]),
         ]),
         rg.list(scrollContainer, LinkItem, (getNext) => {
-            const { isIncoming, currentUrlsPath, recentlyVisitedUrls, currentlyVisibleUrls } = s.args;
+            const { currentlyVisibleUrls } = s.args;
 
             for (const linkInfo of filteredSortedLinks) {
-                const linkUrl = isIncoming ? linkInfo.urlFrom : linkInfo.urlTo;
-                const isRecent = recentlyVisitedUrls.includes(linkUrl);
-
-                const isAlreadyInPath = currentUrlsPath.some(url => url.url === linkUrl);
+                const linkUrl = linkInfo.url;
                 const isVisible = currentlyVisibleUrls.some(url => url === linkUrl);
 
                 getNext().render({
@@ -116,70 +165,18 @@ function UrlList()  {
 
                     linkUrl,
                     onClick: s.args.onClick,
-                    isAlreadyInPath,
-                    isRecent,
                     linkInfo,
-                    isIncoming,
                     isVisible,
                 });
             }
         }),
     ]);
 
-    let filteredSortedLinks: LinkInfo[] = [];
+    const filteredSortedLinks: UrlInfo[] = [];
     function recomputeSate() {
-        const { links, isIncoming, recentlyVisitedUrls, filter } = s.args;
+        const { links, recentlyVisitedUrls, filter } = s.args;
 
-        filteredSortedLinks.splice(0, filteredSortedLinks.length);
-
-        function contains(thing: string | string[] | undefined, queryStr: string): boolean {
-            if (!thing) {
-                return false;
-            }
-
-            let str = thing;
-            if (Array.isArray(str)) {
-                str = str.join(" ");
-            }
-
-            return str.toLowerCase().includes(queryStr.toLowerCase());
-        }
-
-        function pushSubset(recent: boolean) {
-            for (const linkInfo of links) {
-                const linkUrl = isIncoming ? linkInfo.urlFrom : linkInfo.urlTo;
-                const isRecent = recentlyVisitedUrls.includes(linkUrl);
-
-                if (recent !== isRecent) {
-                    continue;
-                }
-
-                if (filter.urlContains && (
-                    // this one is more important than the others
-                    !contains(linkUrl, filter.urlContains) &&
-                    !contains(linkInfo.styleName, filter.urlContains) &&
-                    !contains(linkInfo.attrName, filter.urlContains) &&
-                    !contains(linkInfo.contextString, filter.urlContains) &&
-                    !contains(linkInfo.linkText, filter.urlContains) &&
-                    !contains(linkInfo.linkImage, filter.urlContains)
-                )) {
-                    continue;
-                }
-
-                if (!filter.showAssets && linkInfo.isAsset) {
-                    continue;
-                }
-
-                if (!filter.showPages && !linkInfo.isAsset) {
-                    continue;
-                }
-
-                filteredSortedLinks.push(linkInfo);
-            }
-        }
-
-        pushSubset(true);
-        pushSubset(false);
+        filterUrls(links, filteredSortedLinks, recentlyVisitedUrls, filter);
     }
 
     function render() {
@@ -226,7 +223,7 @@ export function TextInput() {
 
 export function LinkInfoDetails() {
     const s = newState<{
-        linkInfo: LinkInfo;
+        linkInfo: UrlInfo;
         incoming?: boolean;
     }>();
 
@@ -242,17 +239,7 @@ export function LinkInfoDetails() {
     const root = div({}, [
         div({ class: "row handle-long-words" }, [
             div({}, [
-                rg.text(() => {
-                    if (s.args.incoming === true) {
-                        return "<-- " + s.args.linkInfo.urlFrom;
-                    }
-
-                    if (s.args.incoming === false) {
-                        return s.args.linkInfo.urlTo + " -->";
-                    }
-                    
-                    return s.args.linkInfo.urlFrom + " --> " + s.args.linkInfo.urlTo;
-                })
+                rg.text(() => s.args.linkInfo.url)
             ]),
         ]),
         rg.list(
@@ -284,7 +271,7 @@ export function LinkInfoDetails() {
                 // [x] rg.text(() => fmt("Attribute", c.args.linkInfo?.attrName)),
                 // [x]rg.text(() => fmt("Style", c.args.linkInfo?.styleName)),
 
-                if (s.args.linkInfo.redirect) {
+                if (s.args.linkInfo.isRedirect) {
                     getNext().render({
                         alwaysRenderKey: true,
                         key: "This link was created by a redirect.", 
@@ -295,7 +282,7 @@ export function LinkInfoDetails() {
                 if (s.args.linkInfo.isAsset) {
                     getNext().render({
                         alwaysRenderKey: true,
-                        key: "This link should point to an asset.", 
+                        key: "This link is an asset.", 
                         value: undefined,
                     });
                 }
@@ -335,7 +322,7 @@ export function LinkInfoDetails() {
 
 export function UrlExplorer() {
     const s = newState<{ 
-        onNavigate(url: string): void; 
+        onNavigate(url: string, newTab: boolean): void; 
         onHighlightUrl(url: string): void; 
     }>();
 
@@ -345,24 +332,24 @@ export function UrlExplorer() {
 
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 col" }, [
-        rg.if(() => urlStack.length > 1, (rg) => 
+        rg.if(() => !!currentUrl, (rg) => 
             div({ class: "row gap-5 justify-content-center align-items-center", style: "padding: 0 10px;" }, [
-                rg.cArgs(SmallButton(), () => ({
-                    text: "<- (" + urlStack.length + ")",
-                    onClick: popPath,
-                })),
-                rg.if(() => canHighlightCurrentUrl(), rg => 
+                rg.if(() => !!currentUrl, rg => 
                     rg.cArgs(SmallButton(), () => ({
                         text: "Where?",
                         onClick: onHighlightSelected,
                     }))
                 ),
                 div({ class: "flex-1" }),
-                div({ class: "b" }, [rg.text(() => "Currently selected")]),
+                div({ class: "b" }, [rg.text(() => currentUrl || "...")]),
                 div({ class: "flex-1" }),
                 rg.cArgs(SmallButton(), () => ({
                     text: "Go",
-                    onClick: navigateToTopOfTabstack,
+                    onClick: () => navigateToTopOfTabstack(false),
+                })),
+                rg.cArgs(SmallButton(), () => ({
+                    text: "New tab",
+                    onClick: () => navigateToTopOfTabstack(true),
                 })),
             ])
         ),
@@ -399,44 +386,26 @@ export function UrlExplorer() {
             })),
         ]),
         makeSeparator(),
-        div({ class: "col", style: "max-height: 50%" }, [
+        div({ class: "flex-1 col" }, [
             rg.cArgs(UrlList(), () => {
-                if (!data) return;
-
                 return {
-                    title: "Incoming",
-                    links: data.incoming,
-                    isIncoming: true,
-                    onClick: (url) => pushPath(url, true),
-                    currentUrlsPath: urlStack,
-                    currentlyVisibleUrls,
-                    recentlyVisitedUrls,
+                    // TODO: links on this domain
+                    links: allUrlsMetadata,
+
+                    onClick: (url) => setCurrentUrl(url),
+                    currentUrl: currentUrl,
+                    recentlyVisitedUrls: recentlyVisitedUrls,
+                    currentlyVisibleUrls: currentlyVisibleUrls,
                     filter: linkInfoFilter,
+                    title: "All",
                 }
             }),
         ]),
         makeSeparator(),
-        div({ class: "flex-1 col" }, [
-            rg.cArgs(UrlList(), () => {
-                if (!data) return;
-
-                return {
-                    title: "Outgoing",
-                    links: data.outgoing,
-                    isIncoming: false,
-                    onClick: (url) => pushPath(url, false),
-                    currentUrlsPath: urlStack,
-                    recentlyVisitedUrls,
-                    currentlyVisibleUrls,
-                    filter: linkInfoFilter,
-                }
-            }),
+        div({}, [
+            rg.text(() => status),
         ]),
     ]);
-
-    function render() {
-        renderAsync(renderContext.forceRefetch);
-    }
 
     function renderElements() {
         if (!linkInfoFilter.showPages && !linkInfoFilter.showAssets) {
@@ -458,121 +427,93 @@ export function UrlExplorer() {
         showPages: true,
     };
 
-    const urlStack: UrlStackData[] = [];
-
-    let data: CurrentLocationData | undefined;
+    let currentUrl: string | undefined;
     let currentlyVisibleUrls: string[] = [];
     let recentlyVisitedUrls: string[] = [];
-    let currentLinkInfo: LinkInfo | undefined;
+    let allUrls: string[] = [];
+    let allUrlsMetadata: UrlInfo[] = [];
+    let currentLinkInfo: UrlInfo | undefined;
     let currentLinkInfoIsIncoming: boolean;
+    let status = "";
 
-    const fetchState = newRefetcher(renderElements, async () => {
-        const currentUrl = peekUrls();
-        const prevUrl = peekUrlsPrev();
+    const fetchState = newRefetcher({
+        refetch: async () => {
+            status = "fetching url..."
+            renderElements();
 
-        currentLinkInfo = undefined;
-        if (currentUrl && prevUrl) {
-            let linkKey: string | undefined;
-            currentLinkInfoIsIncoming = currentUrl.isIncoming;
-            if (currentUrl.isIncoming) {
-                // this url was an incoming url into the previous url
-                linkKey = getLinkKey(currentUrl.url, prevUrl.url);
-            } else {
-                linkKey = getLinkKey(prevUrl.url, currentUrl.url);
+            if (!currentUrl) {
+                currentUrl = await getCurrentTabUrl();
             }
-            currentLinkInfo = await getLinkInfo(linkKey);
-        }
 
-        data = undefined;
-        if (currentUrl) {
-            data = await getCurrentLocationData(currentUrl.url);
-            data.incoming.sort((a, b) => a.urlTo.localeCompare(b.urlTo));
-            data.outgoing.sort((a, b) => a.urlTo.localeCompare(b.urlTo));
+            status = "fetching all urls..."
+            renderElements();
 
-            recentlyVisitedUrls = await getRecentlyVisitedUrls();
-            currentlyVisibleUrls = data.currentVisibleUrls;
+            const readTx: Record<string, any> = {};
+            readTx["allUrls"] = "allUrls";
+            readTx["currentVisibleUrls"] = "currentVisibleUrls";
+
+            const { 
+                allUrls: allUrlsRead, 
+                currentVisibleUrls: currentVisibleUrlsRead,
+            } = await runReadTx(readTx);
+
+            allUrls = allUrlsRead || [];
+
+            // TODO: fix to only be the recently visited ones instead of all of them...
+            recentlyVisitedUrls = allUrls || [];
+            currentlyVisibleUrls = currentVisibleUrlsRead || [];
+
+            const readTx2: Record<string, any> = {};
+            for (const url of allUrls) {
+                readTx2[url] = getSchemaInstanceFields(URL_SCHEMA, url, [
+                    "linkText",
+                    "isAsset"
+                ]);
+            }
+
+            status = "fetching url metadata..."
+            renderElements();
+            const data = await runReadTx(readTx2);
+
+            console.log({ readTx, allUrlsRead, allUrls, readTx2, data })
+
+            status = "done"
+            recentlyVisitedUrls = pluck(data, "allUrls") ?? [];
+            allUrlsMetadata = Object.values(data);
+
+            renderElements();
+
+            setTimeout(() => {
+                status = "";
+                renderElements();
+            }, 3000);
+        }, 
+        onError: () => {
+            status = "An error occured: "  + fetchState.errorMessage;
+            renderElements();
         }
     });
 
-    async function renderAsync(forceRefetch: boolean) {
-        const currentTabUrl = await getCurrentTabUrl();
-        if (!currentTabUrl) {
-            // not in a tab! so wtf are we even doing here...
-            // hence, early exit
-            return;
-        }
-
-        if (
-            (forceRefetch && urlStack.length === 1) ||
-            currentTabUrl !== urlStack[0]?.url
-        ) {
-            resetPath(currentTabUrl);
-            return;
-        }
-
-        if (!currentTabUrl) {
-            return;
-        }
-    }
-
-    function peekUrls(): UrlStackData | undefined {
-        return urlStack[urlStack.length - 1];
-    }
-
-    function peekUrlsPrev(): UrlStackData | undefined {
-        return urlStack[urlStack.length - 2];
-    }
-
-
-    async function resetPath(url: string) {
-        urlStack.splice(0, urlStack.length);
-        pushPath(
-            url, 
-            // The incoming of the first url doesn't matter at all. it will never be used. 
-            false,
-        );
-    }
-
-    async function pushPath(url: string, isIncoming: boolean) {
-        if (peekUrls()?.url === url) {
-            return;
-        }
-
-        urlStack.push({ 
-            url,
-            isIncoming,
-        });
+    async function renderAsync() {
         await fetchState.refetch();
     }
 
-    async function popPath() {
-        if (urlStack.length > 1) {
-            urlStack.pop();
-            await fetchState.refetch();
-        }
-    }
-
-    function navigateToTopOfTabstack() {
-        const url = peekUrls();
-        if (url) {
-            s.args.onNavigate(url.url);
-        }
-    }
-
-    function canHighlightCurrentUrl() {
-        // Only applicable if we've clicked on a URL from the current page, i.e the 
-        // stack looks like [current url, next url, also outgoing]
-        return urlStack.length === 2 && !urlStack[1].isIncoming;
+    function setCurrentUrl(url: string) {
+        currentUrl = url;
+        renderAsync();
     }
 
     function onHighlightSelected() {
-        if (!canHighlightCurrentUrl()) {
-            return;
+        if (currentUrl) {
+            s.args.onHighlightUrl(currentUrl);
         }
-
-        const url = urlStack[1].url;
-        s.args.onHighlightUrl(url);
     }
 
-    return newComponent(root, render, s);
+    function navigateToTopOfTabstack(newTab: boolean) {
+        if (currentUrl) {
+            s.args.onNavigate(currentUrl, newTab);
+        }
+    }
+
+    return newComponent(root, () => renderAsync(), s);
 }
