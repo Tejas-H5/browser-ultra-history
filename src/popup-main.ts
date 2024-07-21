@@ -20,12 +20,10 @@ function PopupAppRoot() {
     }, [
         rg.c(TopBar(false)),
         div({ class: "flex-1 col" }, [
-            rg.cArgs(UrlExplorer(), () => {
-                return {
-                    onNavigate,
-                    onHighlightUrl,
-                }
-            }),
+            rg(UrlExplorer(), c => c.render({
+                onNavigate,
+                onHighlightUrl,
+            })),
         ]),
     ]);
 

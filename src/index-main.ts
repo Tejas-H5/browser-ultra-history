@@ -1,4 +1,4 @@
-import { appendChild, div, el, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
+import { appendChild, div, el, newComponent, newInsertable, newListRenderer, newRenderGroup } from 'src/utils/dom-utils';
 import { CollectedUrlsViewer } from './collected-urls-viewer';
 import { getAllData, onStateChange } from './default-storage-area';
 import { NetworkGraph } from './network-graph';
@@ -27,19 +27,19 @@ function App() {
                         rg.c(NetworkGraph())
                     ]),
                     div({ class: "flex-1 col" }, [
-                        rg.cArgs(CollectedUrlsViewer(), () => allData),
+                        rg(CollectedUrlsViewer(), c => c.render(allData)),
                     ]),
                 ]),
                 div({ style: "width: 25%" }, [
                     el("H3", {}, "Recently visited"),
-                    rg.list(div(), LinkItem, (getNext) => {
+                    rg(newListRenderer(div(), LinkItem), c => c.render((getNext) => {
                         for(const url of recentUrls) {
                             getNext().render({ 
                                 linkUrl: url,
                                 onClick: onNavigate,
                             });
                         }
-                    })
+                    }))
                 ])
             ])
         ])

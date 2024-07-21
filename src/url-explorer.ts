@@ -1,7 +1,7 @@
 import { getSchemaInstanceFields, pluck, runReadTx } from "./default-storage-area";
 import { SmallButton } from "./small-button";
 import { URL_SCHEMA, UrlInfo, getCurrentTabUrl } from "./state";
-import { __experimental__inlineComponent, div, divClass, el, newComponent, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
+import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
 import { newRefetcher } from "./utils/refetcher";
 
 type UrlListFilter = {
@@ -152,7 +152,7 @@ function UrlList()  {
                 return s.args.title + ": " + total;
             })]),
         ]),
-        rg.list(scrollContainer, LinkItem, (getNext) => {
+        rg(newListRenderer(scrollContainer, LinkItem), c => c.render((getNext) => {
             const { currentlyVisibleUrls } = s.args;
 
             for (const linkInfo of filteredSortedLinks) {
@@ -169,7 +169,7 @@ function UrlList()  {
                     isVisible,
                 });
             }
-        }),
+        })),
     ]);
 
     const filteredSortedLinks: UrlInfo[] = [];
@@ -242,7 +242,7 @@ export function LinkInfoDetails() {
                 rg.text(() => s.args.linkInfo.url)
             ]),
         ]),
-        rg.list(
+        rg( newListRenderer(
             div(),
             () => __experimental__inlineComponent<{ 
                 key: string; value: string[] | undefined; alwaysRenderKey?: boolean; 
@@ -259,8 +259,8 @@ export function LinkInfoDetails() {
                         rg.text(() => ": " + fmt(c.args.value))
                     ])),
                 ])
-            }),
-            (getNext) => {
+            })),
+            c => c.render((getNext) => {
                 // TODO:
                 // rg.if(() => !!c.args.index, rg => rg.text(() => "" + c.args.index!)),
                 // rg.text(() => fmt("Image", c.args.linkInfo?.linkImage)),
@@ -313,7 +313,7 @@ export function LinkInfoDetails() {
                     key: "Styles", 
                     value: s.args.linkInfo.styleName,
                 });
-            }
+            })
         )
     ]);
 
@@ -335,7 +335,7 @@ export function UrlExplorer() {
         rg.if(() => !!currentUrl, (rg) => 
             div({ class: "row gap-5 justify-content-center align-items-center", style: "padding: 0 10px;" }, [
                 rg.if(() => !!currentUrl, rg => 
-                    rg.cArgs(SmallButton(), () => ({
+                    rg(SmallButton(), c => c.render({
                         text: "Where?",
                         onClick: onHighlightSelected,
                     }))
@@ -343,42 +343,42 @@ export function UrlExplorer() {
                 div({ class: "flex-1" }),
                 div({ class: "b" }, [rg.text(() => currentUrl || "...")]),
                 div({ class: "flex-1" }),
-                rg.cArgs(SmallButton(), () => ({
+                rg(SmallButton(), c => c.render({
                     text: "Go",
                     onClick: () => navigateToTopOfTabstack(false),
                 })),
-                rg.cArgs(SmallButton(), () => ({
+                rg(SmallButton(), c => c.render({
                     text: "New tab",
                     onClick: () => navigateToTopOfTabstack(true),
                 })),
             ])
         ),
         div({ class: "row justify-content-center" }, [
-            rg.if(() => !!currentLinkInfo, rg => rg.cArgs(LinkInfoDetails(), () => {
+            rg.if(() => !!currentLinkInfo, rg => rg(LinkInfoDetails(), (c) => {
                 if (!currentLinkInfo) return;
 
-                return {
+                c.render({
                     linkInfo: currentLinkInfo,
                     incoming: currentLinkInfoIsIncoming,
-                };
+                });
             })),
         ]),
         makeSeparator(),
         div({ class: "row gap-5 align-items-center", style: "padding: 0 10px" }, [
             div({ class: "b", style: "padding-right: 10px" }, "Filters: "),
-            rg.cArgs(setAttrs(TextInput(), { style: "max-width: 35%" }), () => ({
+            rg(setAttrs(TextInput(), { style: "max-width: 35%" }), (c) => c.render({
                 text: linkInfoFilter.urlContains, 
                 placeholder: "Url Contains...",
                 onChange: (val) => renderAction(() => linkInfoFilter.urlContains = val),
             })),
             div({ class: "flex-1" }),
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Pages",
                 onClick: () => renderAction(() => linkInfoFilter.showPages = !linkInfoFilter.showPages),
                 toggled: linkInfoFilter.showPages,
                 noBorderRadius: true,
             })),
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Assets",
                 onClick: () => renderAction(() => linkInfoFilter.showAssets = !linkInfoFilter.showAssets),
                 toggled: linkInfoFilter.showAssets,
@@ -387,19 +387,17 @@ export function UrlExplorer() {
         ]),
         makeSeparator(),
         div({ class: "flex-1 col" }, [
-            rg.cArgs(UrlList(), () => {
-                return {
-                    // TODO: links on this domain
-                    links: allUrlsMetadata,
+            rg(UrlList(), c => c.render({
+                // TODO: links on this domain
+                links: allUrlsMetadata,
 
-                    onClick: (url) => setCurrentUrl(url),
-                    currentUrl: currentUrl,
-                    recentlyVisitedUrls: recentlyVisitedUrls,
-                    currentlyVisibleUrls: currentlyVisibleUrls,
-                    filter: linkInfoFilter,
-                    title: "All",
-                }
-            }),
+                onClick: (url) => setCurrentUrl(url),
+                currentUrl: currentUrl,
+                recentlyVisitedUrls: recentlyVisitedUrls,
+                currentlyVisibleUrls: currentlyVisibleUrls,
+                filter: linkInfoFilter,
+                title: "All",
+            })),
         ]),
         makeSeparator(),
         div({}, [

@@ -1,4 +1,4 @@
-export type Insertable<T extends Element = Element> = { 
+export type Insertable<T extends Element = Element> = {
     el: T;
     _isHidden: boolean;
 };
@@ -46,11 +46,11 @@ export function clearChildren(mountPoint: Insertable) {
  * Not as fast as memoizing the variables that effect the style, and then setting this directly only when those vars have changed
  */
 export function setStyle<
-    U extends HTMLElement | SVGElement, 
+    U extends HTMLElement | SVGElement,
     // Apparently I can't just do `K extends keyof CSSStyleDeclaration` without type errors. lmao
     K extends (U extends HTMLElement ? keyof HTMLElement["style"] : keyof SVGElement["style"])
 >(
-    root: Insertable<U>, 
+    root: Insertable<U>,
     val: K, style: U["style"][K]
 ) {
     if (root.el.style[val] !== style) {
@@ -134,7 +134,7 @@ export function isVisible(component: Renderable<unknown, HTMLElement> | Insertab
 }
 
 export function isVisibleElement(el: HTMLElement) {
-    return !!( el.offsetWidth || el.offsetHeight || el.getClientRects().length );
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
 type ComponentPool<U extends Element, T extends Insertable<U>> = {
@@ -175,7 +175,7 @@ export function setAttr(el: Insertable, key: string, val: string | undefined, wr
     if (wrap) {
         el.el.setAttribute(key, (getAttr(el, key) || "") + val);
         return;
-    } 
+    }
 
     if (getAttr(el, key) !== val) {
         el.el.setAttribute(key, val);
@@ -196,7 +196,7 @@ export function setAttrs<T extends Insertable>(
     attrs: Attrs,
     wrap = false,
 ): T {
-    for (const attr in attrs) { 
+    for (const attr in attrs) {
         if (attr === "style" && typeof attrs.style === "object") {
             const styles = attrs[attr] as Record<keyof HTMLElement["style"], string | null>;
             for (const s in styles) {
@@ -264,7 +264,7 @@ export function elSvg<T extends SVGElement>(
  * NOTE: For svg elements, you'll need to use `elSvg`
  */
 export function el<T extends HTMLElement>(
-    type: string, 
+    type: string,
     attrs?: Attrs,
     children?: ChildList,
 ): Insertable<T> {
@@ -328,18 +328,18 @@ function handleRenderingError<T>(root: Insertable, renderFn: () => T | undefined
     } catch (e) {
         setErrorClass(root, true);
         console.error("An error occured while rendering your component:", e);
-    } 
+    }
 }
 
 export type ListRenderer<
-    R extends Element, 
+    R extends Element,
     U extends Element, T extends Insertable<U>,
 > = Insertable<R> & ComponentPool<U, T>;
 
 export type KeyedComponentList<K, T extends Insertable<HTMLElement>> = Insertable & KeyedComponentPool<K, T>;
 
 export function newListRenderer<
-    R extends Element, 
+    R extends Element,
     U extends Element, T extends Insertable<U>,
 >(root: Insertable<R>, createFn: () => T): ListRenderer<R, U, T> {
     function getNext() {
@@ -356,7 +356,7 @@ export function newListRenderer<
         return renderer.components[renderer.lastIdx++];
     }
 
-    let renderFn: ((getNext: () => T) => void)  | undefined;
+    let renderFn: ((getNext: () => T) => void) | undefined;
     function renderFnBinded() {
         renderFn?.(getNext);
     }
@@ -378,10 +378,10 @@ export function newListRenderer<
 
             renderFnBinded();
 
-            while(this.components.length > this.lastIdx) {
+            while (this.components.length > this.lastIdx) {
                 const component = this.components.pop()!;
                 component.el.remove();
-            } 
+            }
         },
     };
 
@@ -397,8 +397,8 @@ export function newListRenderer<
  */
 export function on<K extends keyof HTMLElementEventMap>(
     ins: Insertable<HTMLElement>,
-    type: K, 
-    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
+    type: K,
+    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any,
     options?: boolean | AddEventListenerOptions
 ) {
     ins.el.addEventListener(type, listener, options);
@@ -408,8 +408,8 @@ export function on<K extends keyof HTMLElementEventMap>(
 /** I've found this is very rarely used compared to `on`. Not that there's anything wrong with using this, of course */
 export function off<K extends keyof HTMLElementEventMap>(
     ins: Insertable<HTMLElement>,
-    type: K, 
-    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any, 
+    type: K,
+    listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => any,
     options?: boolean | EventListenerOptions,
 ) {
     ins.el.removeEventListener(type, listener, options);
@@ -439,16 +439,16 @@ export function newKeyedListRenderer<K, T extends Insertable<HTMLElement>>(root:
 
         return newComponent;
     };
-    let renderFn: ((getNext: (key: K) => T) => void)  | undefined;
+    let renderFn: ((getNext: (key: K) => T) => void) | undefined;
     function renderFnBinded() {
         renderFn?.(getNext);
     }
-    const updatedComponentList : HTMLElement[] = [];
+    const updatedComponentList: HTMLElement[] = [];
     const renderer: KeyedComponentList<K, T> = {
         el: root.el,
         get _isHidden() { return root._isHidden; },
         set _isHidden(val: boolean) { root._isHidden = val; },
-        components: new Map<K, { c: T, del: boolean }>(), 
+        components: new Map<K, { c: T, del: boolean }>(),
         render(renderFnIn) {
             renderFn = renderFnIn;
 
@@ -487,7 +487,7 @@ export function setInputValueAndResize(inputComponent: InsertableInput, text: st
 
 /** This is how I know to make an input that auto-sizes to it's text */
 export function resizeInputToValue(inputComponent: InsertableInput) {
-    setAttr(inputComponent, "size", "" + inputComponent.el .value.length);
+    setAttr(inputComponent, "size", "" + inputComponent.el.value.length);
 }
 
 function wasHiddenOrUninserted(ins: Insertable) {
@@ -600,28 +600,28 @@ export function newState<T = undefined>(initialValue: T | null = null) {
  *
  * An example of a correct usage:
  *
-   ```
-   function UserProfile() {
-        const s = newState<{ user: User }>();
-  
-        const rg = newRenderGroup();
-        const root = div({}, [ 
-            div({}, rg.text(() => s.args.user.FirstName + " " + s.args.user.LastName)),
-            div({}, rg.text(() => "todo: implement the rest of this component later")),
-        ]);
-  
-        function render() {
-            rg.render();
-        }
-        
-        // if `s` and `root` are specified and have known types, the type of this component will be correctly inferred.
-        return newComponent(root, render, s);
-   }
+ * ```
+ * function UserProfile() {
+ *      const s = newState<{ user: User }>();
+ *
+ *      const rg = newRenderGroup();
+ *      const root = div({}, [ 
+ *          div({}, rg.text(() => s.args.user.FirstName + " " + s.args.user.LastName)),
+ *          div({}, rg.text(() => "todo: implement the rest of this component later")),
+ *      ]);
+ *
+ *      function render() {
+ *          rg.render();
+ *      }
+ *      
+ *      // if `s` and `root` are specified and have known types, the type of this component will be correctly inferred.
+ *      return newComponent(root, render, s);
+ * }
  * ```
  *
  */
 export function newComponent<T, U extends Element>(root: Insertable<U>, renderFn: () => void, s: ComponentState<T> = newState()) {
-    const component : Renderable<T, U> = {
+    const component: Renderable<T, U> = {
         el: root.el,
         skipErrorBoundary: false,
         get _isHidden() { return root._isHidden; },
@@ -643,23 +643,14 @@ export function newComponent<T, U extends Element>(root: Insertable<U>, renderFn
     return component;
 }
 
-export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => any) => Renderable<unknown, U>) & {
+export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => any) => T) & {
     render: () => void;
     /** This is actually implemented with a SPAN and not a text node like you may have thought */
-    text: (fn: () => string) => Renderable<unknown, HTMLSpanElement>;
+    text: (fn: () => string) => Insertable<HTMLSpanElement>;
+    /** This is just a shortcut for code like `rg(Renderable(), (c) => c.render(undefined))`. */
     c: <U extends Element>(renderable: Renderable<unknown, U>) => Renderable<unknown, U>;
     /** {@link insFn} is a function that gets it's own render group as an input, which will only render if fn() returned true.  */
     if: <U extends HTMLElement | SVGElement>(fn: () => boolean, insFn: (rg: RenderGroup) => Insertable<U>) => Renderable<unknown, U>;
-    /** 
-     * only renders the component if argsFn doesn't return undefined. 
-     * For components that take in a single `undefined` argument, just use {@link RenderGroup.c}
-     */
-    cArgs: <T, U extends Element>(renderable: Renderable<T, U>, argsFn: () => T | undefined) => Renderable<T, U>;
-    list: <R extends Element, T, U extends Element>(
-        root: Insertable<R>,
-        Component: () => Renderable<T, U>,
-        renderFn: (getNext: () => Renderable<T, U>) => void,
-    ) => ListRenderer<R, Element, Renderable<T, U>>;
 };
 
 /**
@@ -718,7 +709,7 @@ export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, u
  *      const root = div({}, [
  *          div({}, [ rg.text(() => s.args.user.FirstName + " " + s.args.user.LastName) ]),
  *          div({}, [ rg.text(() => s.args.user.ProfileInfo.Bio) ],
- *          rg.list(div(), UserProfileInfoPair, (getNext) => {
+ *          rg(newListRenderer(div(), UserProfileInfoPair), list => list.render((getNext) => {
  *              // todo: display this info properly
  *              for (const key in user.ProfileInfo) {
  *                  // We're already rendering this correctly
@@ -728,7 +719,7 @@ export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, u
  *
  *                  getNext().render({ key: key, value: user.ProfileInfo[key] });
  *              }
- *          })
+ *          }))
  *      ]);
  *
  *      return newComponent(root, rg.render, s);
@@ -743,45 +734,27 @@ export type RenderGroup = (<U extends Element, T extends Insertable<U>>(el: T, u
  *
  */
 export function newRenderGroup(): RenderGroup {
-    const renderables: Renderable[] =  [];
+    const renderables: Renderable[] = [];
 
-    const push = <U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => any): Renderable<unknown, U> => {
+    const push = <U extends Element, T extends Insertable<U>>(el: T, updateFn: (el: T) => void): T => {
         const c = newComponent(el, () => updateFn(el));
         renderables.push(c);
-        return c;
+        return el;
     }
 
     const rg: RenderGroup = Object.assign(push, {
-        render () {
+        render() {
             for (const r of renderables) {
                 r.render(undefined);
             }
         },
-        text: (fn: () => string): Renderable<unknown, HTMLSpanElement> => {
+        text: (fn: () => string): Insertable<HTMLSpanElement> => {
             const spanEl = span();
             return push(spanEl, () => setText(spanEl, fn()));
         },
         c: <U extends Element>(renderable: Renderable<unknown, U>): Renderable<unknown, U> => {
             renderables.push(renderable);
             return renderable;
-        },
-        cArgs: <T, U extends Element>(renderable: Renderable<T, U>, argsFn: () => T | undefined) => {
-            push(renderable, () => {
-                const args = argsFn();
-                if (args !== undefined) {
-                    renderable.render(args);
-                }
-            });
-            return renderable;
-        },
-        list: <R extends Element, T, U extends Element>(
-            root: Insertable<R>, 
-            Component: () => Renderable<T, U>, 
-            renderFn: (getNext: () => Renderable<T, U>) => void,
-        ): ListRenderer<R, Element, Renderable<T, U>> => {
-            const list = newListRenderer(root, Component);
-            push(list, () => list.render(renderFn));
-            return list;
         },
         if: <U extends HTMLElement | SVGElement>(fn: () => boolean, insFn: (rg: RenderGroup) => Insertable<U>): Renderable<unknown, U> => {
             const c = inlineComponent(insFn);
@@ -814,7 +787,7 @@ function inlineComponent<T = undefined, U extends Element = Element>(
 export const __experimental__inlineComponent = inlineComponent;
 
 export function newInsertable<T extends Element>(el: T): Insertable<T> {
-    return  {
+    return {
         el,
         _isHidden: false,
     };
@@ -866,7 +839,7 @@ export type Renderable<T = unknown, U extends Element = Element> = Insertable<U>
      * }
      * ```
      */
-    render(args: T):void;
+    render(args: T): void;
     state: ComponentState<T>;
     skipErrorBoundary: boolean;
 }
@@ -879,7 +852,7 @@ export function isEditingTextSomewhereInDocument(): boolean {
 
     const type = el.nodeName.toLocaleLowerCase();
     if (
-        type === "textarea" || 
+        type === "textarea" ||
         type === "input"
     ) {
         return true;
@@ -892,18 +865,33 @@ export function isEditingTextSomewhereInDocument(): boolean {
  * Scrolls {@link scrollParent} to bring scrollTo into view.
  * {@link scrollToRelativeOffset} specifies where to to scroll to. 0 = bring it to the top of the scroll container, 1 = bring it to the bottom
  */
-export function scrollIntoViewV(
-    scrollParent: HTMLElement, 
-    scrollTo: Insertable<HTMLElement>, 
+export function scrollIntoView(
+    scrollParent: HTMLElement,
+    scrollTo: Insertable<HTMLElement>,
     scrollToRelativeOffset: number,
+    horizontal = false,
 ) {
+    if (horizontal) {
+        // NOTE: this is a copy-paste from below
+
+        const scrollOffset = scrollToRelativeOffset * scrollParent.offsetWidth;
+        const elementWidthOffset = scrollToRelativeOffset * scrollTo.el.getBoundingClientRect().width;
+
+        // offsetLeft is relative to the document, not the scroll container. lmao
+        const scrollToElOffsetLeft = scrollTo.el.offsetLeft - scrollParent.offsetLeft;
+
+        scrollParent.scrollLeft = scrollToElOffsetLeft - scrollOffset + elementWidthOffset;
+
+        return;
+    }
+
     const scrollOffset = scrollToRelativeOffset * scrollParent.offsetHeight;
     const elementHeightOffset = scrollToRelativeOffset * scrollTo.el.getBoundingClientRect().height;
 
     // offsetTop is relative to the document, not the scroll container. lmao
     const scrollToElOffsetTop = scrollTo.el.offsetTop - scrollParent.offsetTop;
 
-    scrollParent.scrollTop = scrollToElOffsetTop - scrollOffset  + elementHeightOffset;
+    scrollParent.scrollTop = scrollToElOffsetTop - scrollOffset + elementHeightOffset;
 }
 
 export function setCssVars(vars: [string, string][]) {

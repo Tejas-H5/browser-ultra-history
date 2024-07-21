@@ -10,7 +10,7 @@ import { newRefetcher } from './utils/refetcher';
 export function TopBar(isMain: boolean) {
     const rg = newRenderGroup();
     const root = div({ class: "row sb1b", style: "gap: 3px" }, [
-        rg.cArgs(SmallButton(), () => ({
+        rg(SmallButton(), c => c.render({
             text: enabledFlags.extension ? "Active" : "Disabled",
             title: "Enable or disable url collection activities. Though disabled, you will still be able to traverse what you've collected",
             onClick: async () => {
@@ -20,7 +20,7 @@ export function TopBar(isMain: boolean) {
             },
             toggled: enabledFlags.extension,
         })),
-        rg.cArgs(SmallButton(), () => ({
+        rg(SmallButton(), c => c.render({
             text: "Deep collect",
             title: "Some of these collection strategies are frankly unnecessary and cause a lot of lag for regular use. Only enable this on if you want to have some fun!",
             onClick: async () => {
@@ -32,7 +32,7 @@ export function TopBar(isMain: boolean) {
             toggled: (enabledFlags.extension && enabledFlags.deepCollect),
         })),
         !isMain && (
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Collect from this tab",
                 onClick: async () => {
                     await collectUrlsFromActiveTab();
@@ -41,7 +41,7 @@ export function TopBar(isMain: boolean) {
             }))
         ),
         isMain && (
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Collect from all tab",
                 onClick: async () => {
                     await collectUrlsFromTabs();
@@ -50,7 +50,7 @@ export function TopBar(isMain: boolean) {
             }))
         ),
         !isMain && (
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Clear",
                 onClick: async () => {
                     await clearAllData();
@@ -66,7 +66,7 @@ export function TopBar(isMain: boolean) {
         div({ class: "flex-1" }),
 
         ...(!isMain ? [
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Open Extension Tab",
                 onClick: async () => {
                     await openExtensionTab();
@@ -74,14 +74,14 @@ export function TopBar(isMain: boolean) {
                 }
             })),
         ] : [
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Save JSON",
                 onClick: async () => {
                     const jsonString = await getStateJSON();
                     saveText(jsonString, "Browser-Graph-State-" + Date.now() + ".json");
                 }
             })),
-            rg.cArgs(SmallButton(), () => ({
+            rg(SmallButton(), c => c.render({
                 text: "Load JSON",
                 onClick: async () => {
                     loadFile((file) => {

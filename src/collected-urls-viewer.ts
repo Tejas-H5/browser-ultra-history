@@ -1,6 +1,6 @@
 import { isTypeKey } from "./default-storage-area";
 import { URL_SCHEMA, UrlInfo } from "./state";
-import { div, newComponent, newRenderGroup, newState } from "./utils/dom-utils";
+import { div, newComponent, newListRenderer, newRenderGroup, newState } from "./utils/dom-utils";
 
 function UrlItem() {
     const s = newState<{ info: UrlInfo | undefined; }>();
@@ -10,8 +10,7 @@ function UrlItem() {
         rg.text(() => "URL: " + s.args?.info?.url || "??"),
     ]);
 
-    const c = newComponent(root, rg.render, s);
-    return c;
+    return newComponent(root, rg.render, s);
 }
 
 // component is in limbo. TODO: finsih or delete
@@ -20,7 +19,7 @@ export function CollectedUrlsViewer() {
 
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 flex-center" }, [
-        rg.list(div(), UrlItem, (getNext) => {
+        rg(newListRenderer(div(), UrlItem), c => c.render((getNext) => {
             const data = s.args?.allData;
             if (!data) {
                 return;
@@ -35,7 +34,7 @@ export function CollectedUrlsViewer() {
                     info: data[k] as UrlInfo | undefined
                 });
             }
-        })
+        }))
     ]);
 
     const c = newComponent(root, rg.render, s);
