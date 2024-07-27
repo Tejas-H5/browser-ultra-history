@@ -3,7 +3,7 @@ import { div, newComponent, newRenderGroup, newState, newStyleGenerator, on, set
 const sg = newStyleGenerator();
 
 const cnSmallButton = sg.makeClass("small-button", [
-    ` { color: var(--fg-color); background-color: var(--bg-color); }`,
+    ` { color: var(--fg-color); background-color: var(--bg-color); user-select: none; }`,
     `:hover { cursor:pointer; background-color: var(--bg-color-focus) }`,
     `.inverted { color: var(--bg-color); background-color: var(--fg-color); }`,
     `.radius { border: 2px solid black; border-radius: 5px; padding: 0 10px; }`,
@@ -16,7 +16,7 @@ export function SmallButton() {
 
         // optional effects
         toggled?: boolean;
-        title?: string;
+        title?: string; // This is the html default tooltip, in case you've forgotten
         noBorderRadius?: boolean;
     }>();
 

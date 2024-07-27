@@ -620,7 +620,11 @@ export function newState<T = undefined>(initialValue: T | null = null) {
  * ```
  *
  */
-export function newComponent<T, U extends Element>(root: Insertable<U>, renderFn: () => void, s: ComponentState<T> = newState()) {
+export function newComponent<T, U extends Element>(
+    root: Insertable<U>, 
+    renderFn: () => void, 
+    s: ComponentState<T> = newState(),
+) {
     const component: Renderable<T, U> = {
         el: root.el,
         skipErrorBoundary: false,

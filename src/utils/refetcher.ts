@@ -10,13 +10,18 @@ export function newRefetcher<T extends any[]>({
     const state: AsyncState<T> = {
         state: "none",
         errorMessage: undefined,
+        isFetching: false,
         refetch: async (...args: T) => {
+            if (state.isFetching) {
+                return;
+            }
+
             state.state = "loading";
             state.errorMessage = undefined;
+            state.isFetching = true;
 
             try {
                 await refetch(...args);
-
                 state.state = "loaded";
             } catch(err) {
                 state.state = "failed";
@@ -28,7 +33,9 @@ export function newRefetcher<T extends any[]>({
                 console.error("error in fetching method", err);
 
                 onError();
-            } 
+            } finally {
+                state.isFetching = false;
+            }
         }
     };
 
@@ -38,5 +45,6 @@ export function newRefetcher<T extends any[]>({
 export type AsyncState<T extends any[]> = {
     state: "none" | "loading" |  "loaded" | "failed";
     errorMessage: string | undefined;
+    isFetching: boolean;
     refetch: (...args: T) => Promise<void>;
 }

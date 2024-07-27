@@ -1,10 +1,10 @@
 import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
-import browser from "webextension-polyfill";
+import { onStateChange } from './default-storage-area';
+import { navigateToUrl } from './open-pages';
 import { renderContext } from './render-context';
-import { getCurrentTab, getTheme, sendMessageToCurrentTab, setTheme } from './state';
+import { getTheme, sendMessageToCurrentTab, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
-import { onStateChange } from './default-storage-area';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded popup main!")
@@ -21,7 +21,9 @@ function PopupAppRoot() {
         rg.c(TopBar(false)),
         div({ class: "flex-1 col" }, [
             rg(UrlExplorer(), c => c.render({
-                onNavigate,
+                onNavigate(url, newTab) {
+                    navigateToUrl(url, newTab, true);
+                },
                 onHighlightUrl,
             })),
         ]),
@@ -29,32 +31,6 @@ function PopupAppRoot() {
 
     function onHighlightUrl(url: string) {
         sendMessageToCurrentTab({ type: "content_highlight_url", url })
-    }
-
-    async function onNavigate(urlTo: string, newTab: boolean) {
-        if (newTab) {
-            await browser.tabs.create({
-                url: urlTo,
-                active: true,
-                index: 10000,
-            });
-
-            return;
-        }
-
-        const currentTab = await getCurrentTab();
-        if (!currentTab) {
-            return;
-        }
-
-        const { url, id } = currentTab;
-        if (!url || (!id && id !== 0)) {
-            return;
-        }
-
-        browser.tabs.update(currentTab.id, {
-            url: urlTo,
-        });
     }
 
     function render() {

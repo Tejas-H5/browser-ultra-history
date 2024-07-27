@@ -1,7 +1,9 @@
-import { getSchemaInstanceFields, pluck, runReadTx } from "./default-storage-area";
+import { Checkbox } from "./components/checkbox";
+import { SKIP_READ_KEY, getSchemaInstanceFields, pluck, runReadTx } from "./default-storage-area";
 import { SmallButton } from "./small-button";
-import { URL_SCHEMA, UrlInfo, getCurrentTabUrl } from "./state";
-import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, span } from "./utils/dom-utils";
+import { URL_SCHEMA, UrlInfo, getCurrentTab, getUrlDomain } from "./state";
+import { filterInPlace } from "./utils/array-utils";
+import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, setVisible, span } from "./utils/dom-utils";
 import { newRefetcher } from "./utils/refetcher";
 
 type UrlListFilter = {
@@ -15,54 +17,64 @@ const sg = newStyleGenerator();
 const cnLinkItem = sg.makeClass("linkItem", [
     `.incoming:hover::before { content: "<--- "; }`,
     `.outgoing:hover::after { content: " --->"; }`,
-    `:hover { cursor: pointer; text-decoration: underline; text-decoration-color: var(--fg-color); }`,
+    ` .link-part:hover { cursor: pointer; text-decoration: underline; text-decoration-color: var(--fg-color); }`,
     `.alreadyInPath { color: #00F }`,
     `.recentlyVisited { background-color: #AFC2FF; }`,
+    `.selected { background-color: var(--bg-color-focus); }`,
 ]);
 
 export function LinkItem() {
     const s = newState<{
-        linkUrl: string;
+        url: string;
+        linkText: string;
         onClick(url: string): void;
+        onUrlPartClick(url: string): void;
 
         index?: number;
         linkInfo?: UrlInfo;
-        isVisible?: boolean;
-        isIncoming?: boolean;
-        isAlreadyInPath?: boolean;
-        isRecent?: boolean;
+        isVisibleOnCurrentPage?: boolean;
+        currentUrl?: string;
     }>();
 
     const rg = newRenderGroup();
     const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
-        rg.text(() => s.args.isVisible ? "[Visible] " : ""),
-        rg.text(() => s.args.linkUrl),
+        rg.text(() => s.args.isVisibleOnCurrentPage ? "[Visible] " : ""),
+        rg.text(() => s.args.linkText),
+        on(
+            span({ class: "link-part" }, [
+                rg.text(() => " (" + s.args.url + ")"),
+            ]), 
+            "click", 
+            () => s.args.onUrlPartClick(s.args.url),
+        )
     ]);
-
-    function canClick() {
-        return !s.args.isAlreadyInPath;
-    }
 
     function render() {
         rg.render();
 
-        setClass(root, "incoming", s.args.isIncoming === true);
-        setClass(root, "outgoing", s.args.isIncoming === false);
-        setClass(root, "alreadyInPath", !!s.args.isAlreadyInPath);
-        setClass(root, "recentlyVisited", !!s.args.isRecent);
+        setClass(root, "selected", s.args.currentUrl === s.args.url);
     }
 
     on(root, "click", () => {
-        const { onClick, linkUrl } = s.args;
-
-        if (canClick()) {
-            onClick(linkUrl);
-        }
+        const { onClick, url: linkUrl } = s.args;
+        onClick(linkUrl);
     });
 
     return newComponent(root, render, s);
 }
 
+function contains(thing: string | string[] | undefined, queryStr: string): boolean {
+    if (!thing) {
+        return false;
+    }
+
+    let str = thing;
+    if (Array.isArray(str)) {
+        str = str.join(" ");
+    }
+
+    return str.toLowerCase().includes(queryStr.toLowerCase());
+}
 function filterUrls(
     src: UrlInfo[], 
     dst: UrlInfo[], 
@@ -70,18 +82,6 @@ function filterUrls(
     filter: UrlListFilter,
 ) {
     dst.splice(0, dst.length);
-    function contains(thing: string | string[] | undefined, queryStr: string): boolean {
-        if (!thing) {
-            return false;
-        }
-
-        let str = thing;
-        if (Array.isArray(str)) {
-            str = str.join(" ");
-        }
-
-        return str.toLowerCase().includes(queryStr.toLowerCase());
-    }
 
     function pushSubset(recent: boolean) {
         for (const linkInfo of src) {
@@ -123,7 +123,8 @@ function filterUrls(
 function UrlList()  {
     const s = newState<{
         links: UrlInfo[]; 
-        onClick: (url: string) => void;
+        onClick(url: string): void;
+        onUrlClick(url: string): void;
 
         currentUrl: string | undefined;
         recentlyVisitedUrls: string[];
@@ -163,10 +164,13 @@ function UrlList()  {
                     // mainly for debugging, toggle as needed
                     // index: i,
 
-                    linkUrl,
+                    url: linkUrl,
+                    linkText: linkInfo.linkText?.join(", ") ?? "",
                     onClick: s.args.onClick,
+                    onUrlPartClick: s.args.onUrlClick,
                     linkInfo,
-                    isVisible,
+                    isVisibleOnCurrentPage: isVisible,
+                    currentUrl: s.args.currentUrl ?? "",
                 });
             }
         })),
@@ -188,7 +192,7 @@ function UrlList()  {
 }
 
 const cnTextInput = sg.makeClass("text-input", [
-    `{ color: var(--fg-color); background-color: var(--bg-color); }`,
+    `{ width: 100%; color: var(--fg-color); background-color: var(--bg-color); }`,
     `:focus { background-color: var(--bg-color-focus); }`,
 ]);
 
@@ -224,7 +228,6 @@ export function TextInput() {
 export function LinkInfoDetails() {
     const s = newState<{
         linkInfo: UrlInfo;
-        incoming?: boolean;
     }>();
 
     function fmt(str: string[] | undefined) {
@@ -320,68 +323,254 @@ export function LinkInfoDetails() {
     return newComponent(root, rg.render, s);
 }
 
-export function UrlExplorer() {
-    const s = newState<{ 
-        onNavigate(url: string, newTab: boolean): void; 
-        onHighlightUrl(url: string): void; 
+
+function makeSeparator() {
+    return div({ style: "height: 1px; background-color: var(--fg-color)" });
+}
+
+function setSelected(array: string[], key: string, val: boolean) {
+    const isSelected = array.includes(key);
+    if (isSelected === val) {
+        return;
+    }
+
+    if (isSelected) {
+        filterInPlace(array, (d) => d !== key);
+    } else {
+        array.push(key);
+    }
+}
+
+function DomainsScreen() {
+    function DomainItem() {
+        const s = newState<{
+            domain: string;
+            count: number | undefined;
+            isChecked: boolean;
+            onChange(selectType: "replace" | "range" | "toggle"): void;
+        }>();        
+
+        function getCountText(): string {
+            const count = s.args.count;
+            if (count ===  undefined) {
+                return "unknown count";
+            }
+
+            return "" + count;
+        }
+
+        const g = newRenderGroup();
+        const root = div({ class: "row" }, [
+            g(Checkbox(), c => c.render({
+                value: s.args.isChecked,
+                label: s.args.domain + " (" + getCountText() + ")",
+                onChange(value, e) {
+                    const selectType = e.shiftKey ? "range" : (e.ctrlKey || e.metaKey) ? "toggle" : "replace";
+                    s.args.onChange(selectType);
+                }
+            })),
+        ]);
+
+        function renderDomainItem() {
+            g.render();
+        }
+
+        return newComponent(root, renderDomainItem, s);
+    }
+
+    const s = newState<{
+        visible: boolean;
+        state: UrlExplorerState;
     }>();
 
-    function makeSeparator() {
-        return div({ style: "height: 1px; background-color: var(--fg-color)" });
+
+    const refetcher = newRefetcher({
+        async refetch() {
+            const { state } = s.args;
+
+            state.status = "loading domains...";
+            state.renderUrlExplorer();
+            let allDomains = await runReadTx("allDomains");
+            allDomains = allDomains || [];
+
+            const countTx: Record<string, string> = {};
+            for (const domainUrl of allDomains) {
+                countTx[domainUrl] = "allUrlsCount:" + domainUrl;
+            }
+            state.status = "loading domain counts...";
+            state.renderUrlExplorer();
+            const countData = await runReadTx(countTx);
+
+            state.allDomains = [];
+            for (const domainUrl of allDomains) {
+                state.allDomains.push({
+                    url: domainUrl,
+                    count: countData[domainUrl],
+                });
+            }
+
+            state.status = "done";
+            state.renderUrlExplorer(true);
+        },
+        onError() {
+            const { state } = s.args;
+            state.status = "Error fetching statuses";
+        }
+    });
+
+    let domainContains = "";
+    function isDomainFiltered(domain: string) {
+        return !domainContains || contains(domain, domainContains);
     }
+
+    // TODO: literally use scroll container
+    const scrollContainer = div({ 
+        class: "nowrap overflow-y-auto", 
+        // Need padding for the scrollbar
+        style: "padding-bottom: 10px" 
+    });
+    const rg = newRenderGroup();
+    const root = div({ class: "p-5 col", style: "max-height: 50%" }, [
+        rg(setAttrs(TextInput(), { style: "width: 100%" }), (c) => c.render({
+            text: domainContains,
+            placeholder: "Domain contains...",
+            onChange: (val) => {
+                domainContains = val;
+                renderDomainsScreen();
+            }
+        })),
+        rg.if(() => s.args.state.allDomains.length === 0, rg => (
+            div({}, "No domains! Try browsing some internet")
+        )),
+        rg(newListRenderer(scrollContainer, DomainItem), c => c.render((getNext) => {
+            const { state } = s.args;
+
+            for(let i = 0; i < state.allDomains.length; i++) {
+                const domain = state.allDomains[i];
+                if (!isDomainFiltered(domain.url)) continue;
+
+                const isSelected = state.selectedDomains.includes(domain.url);
+                const c = getNext();
+
+                c.render({
+                    domain: domain.url,
+                    count: domain.count,
+                    isChecked: isSelected, 
+                    onChange(type) {
+                        const state = s.args.state;
+
+                        // disable range-selections if they can't be done
+                        const lastIdx = state.allDomainsLastSelectedIdx;
+                        state.allDomainsLastSelectedIdx = i;
+
+                        if (
+                            (lastIdx < 0 || lastIdx >= state.allDomains.length)
+                            && type === "range"
+                        ) {
+                            type = "toggle";
+                        }
+
+                        if (type === "toggle") {
+                            setSelected(state.selectedDomains, domain.url, !isSelected);
+                            state.renderUrlExplorer(true);
+                            return;
+                        }
+
+                        if (type === "replace") {
+                            state.selectedDomains = [domain.url]
+                            state.renderUrlExplorer(true);
+                            return;
+                        }
+
+                        if (type === "range") {
+                            const min = Math.min(lastIdx, i);
+                            const max = Math.max(lastIdx, i);
+                            for (let i = min; i <= max; i++) {
+                                const domain = state.allDomains[i];
+                                if (!isDomainFiltered(domain.url)) continue;
+                                setSelected(state.selectedDomains, domain.url, !isSelected);
+                            }
+
+                            state.renderUrlExplorer(true);
+                            return;
+                        }
+
+                        state.renderUrlExplorer(true);
+                        return;
+                    }
+                });
+            }
+        }))
+    ]);
+
+    let lastVisible = false;
+    function renderDomainsScreen() {
+        if (lastVisible !== setVisible(root, s.args.visible)) {
+            lastVisible = s.args.visible;
+            refetcher.refetch();
+            return;
+        }
+
+        if (!lastVisible) {
+            return;
+        }
+
+        rg.render();
+    }
+
+    return newComponent(root, renderDomainsScreen, s);
+}
+
+function UrlsScreen() {
+    const s = newState<{
+        state: UrlExplorerState;
+        onNavigate(url: string, newTab: boolean): void;
+        onHighlightUrl(url: string): void;
+    }>();
 
     const rg = newRenderGroup();
     const root = div({ class: "flex-1 p-5 col" }, [
-        rg.if(() => !!currentUrl, (rg) => 
-            div({ class: "row gap-5 justify-content-center align-items-center", style: "padding: 0 10px;" }, [
-                rg.if(() => !!currentUrl, rg => 
+        makeSeparator(),
+        rg.if(() => !!s.args.state.currentUrl, (rg) =>
+            div({ class: "row gap-5 justify-content-center align-items-center", style: "padding: 0 5px;" }, [
+                rg.if(() => !!s.args.state.currentUrl, rg =>
                     rg(SmallButton(), c => c.render({
                         text: "Where?",
                         onClick: onHighlightSelected,
                     }))
                 ),
                 div({ class: "flex-1" }),
-                div({ class: "b" }, [rg.text(() => currentUrl || "...")]),
+                div({ class: "b" }, [rg.text(() => s.args.state.currentUrl || "...")]),
                 div({ class: "flex-1" }),
-                rg(SmallButton(), c => c.render({
-                    text: "Go",
-                    onClick: () => navigateToTopOfTabstack(false),
-                })),
-                rg(SmallButton(), c => c.render({
-                    text: "New tab",
-                    onClick: () => navigateToTopOfTabstack(true),
-                })),
             ])
         ),
         div({ class: "row justify-content-center" }, [
-            rg.if(() => !!currentLinkInfo, rg => rg(LinkInfoDetails(), (c) => {
-                if (!currentLinkInfo) return;
+            rg.if(() => !!s.args.state.currentLinkInfo, rg => rg(LinkInfoDetails(), (c) => {
+                if (!s.args.state.currentLinkInfo) return;
 
-                c.render({
-                    linkInfo: currentLinkInfo,
-                    incoming: currentLinkInfoIsIncoming,
-                });
+                c.render({ linkInfo: s.args.state.currentLinkInfo, });
             })),
         ]),
         makeSeparator(),
         div({ class: "row gap-5 align-items-center", style: "padding: 0 10px" }, [
             div({ class: "b", style: "padding-right: 10px" }, "Filters: "),
-            rg(setAttrs(TextInput(), { style: "max-width: 35%" }), (c) => c.render({
-                text: linkInfoFilter.urlContains, 
-                placeholder: "Url Contains...",
-                onChange: (val) => renderAction(() => linkInfoFilter.urlContains = val),
-            })),
-            div({ class: "flex-1" }),
+            div({ class: "flex-1" }, [
+                rg(setAttrs(TextInput(), { style: "width: 100%" }), (c) => c.render({
+                    text: s.args.state.linkInfoFilter.urlContains,
+                    placeholder: "Url contains...",
+                    onChange: (val) => renderAction(() => s.args.state.linkInfoFilter.urlContains = val),
+                })),
+            ]),
             rg(SmallButton(), c => c.render({
                 text: "Pages",
-                onClick: () => renderAction(() => linkInfoFilter.showPages = !linkInfoFilter.showPages),
-                toggled: linkInfoFilter.showPages,
+                onClick: () => renderAction(() => s.args.state.linkInfoFilter.showPages = !s.args.state.linkInfoFilter.showPages),
+                toggled: s.args.state.linkInfoFilter.showPages,
                 noBorderRadius: true,
             })),
             rg(SmallButton(), c => c.render({
                 text: "Assets",
-                onClick: () => renderAction(() => linkInfoFilter.showAssets = !linkInfoFilter.showAssets),
-                toggled: linkInfoFilter.showAssets,
+                onClick: () => renderAction(() => s.args.state.linkInfoFilter.showAssets = !s.args.state.linkInfoFilter.showAssets),
+                toggled: s.args.state.linkInfoFilter.showAssets,
                 noBorderRadius: true,
             })),
         ]),
@@ -389,129 +578,238 @@ export function UrlExplorer() {
         div({ class: "flex-1 col" }, [
             rg(UrlList(), c => c.render({
                 // TODO: links on this domain
-                links: allUrlsMetadata,
+                links: s.args.state.allUrlsMetadata,
 
                 onClick: (url) => setCurrentUrl(url),
-                currentUrl: currentUrl,
-                recentlyVisitedUrls: recentlyVisitedUrls,
-                currentlyVisibleUrls: currentlyVisibleUrls,
-                filter: linkInfoFilter,
+                onUrlClick: (url) => s.args.onNavigate(url, true),
+                currentUrl: s.args.state.currentUrl,
+                recentlyVisitedUrls: s.args.state.recentlyVisitedUrls,
+                currentlyVisibleUrls: s.args.state.currentlyVisibleUrls,
+                filter: s.args.state.linkInfoFilter,
                 title: "All",
             })),
         ]),
+    ]);
+
+    function renderAction(fn: () => void) {
+        fn();
+        renderUrlsScreen();
+    }
+
+    function setCurrentUrl(url: string) {
+        s.args.state.currentUrl = url;
+        renderUrlsScreen();
+    }
+
+    function onHighlightSelected() {
+        if (s.args.state.currentUrl) {
+            s.args.onHighlightUrl(s.args.state.currentUrl);
+        }
+    }
+
+
+    function renderUrlsScreen() {
+        rg.render();
+    }
+
+    return newComponent(root, renderUrlsScreen, s);
+}
+
+type UrlExplorerState = {
+    renderUrlExplorer(refetch?: boolean): void;
+    linkInfoFilter: UrlListFilter;
+    currentScreen: "url" | "domain";
+    currentUrl?: string;
+    currentlyVisibleUrls: string[];
+    recentlyVisitedUrls: string[];
+    allUrls: string[];
+    selectedDomains: string[];
+    allDomains: {
+        url: string;
+        count: number | undefined;
+    }[];
+    allDomainsLastSelectedIdx: number;
+    allUrlsMetadata: UrlInfo[];
+    currentLinkInfo?: UrlInfo;
+    status: string;
+};
+
+export function UrlExplorer() {
+    const s = newState<{
+        onNavigate(url: string, newTab: boolean): void;
+        onHighlightUrl(url: string): void;
+    }>();
+
+    const state: UrlExplorerState = {
+        renderUrlExplorer: renderUrlExplorer,
+        currentScreen: "url",
+        currentlyVisibleUrls: [],
+        recentlyVisitedUrls: [],
+        allUrls: [],
+        selectedDomains: [],
+        allDomains: [],
+        allDomainsLastSelectedIdx: -1,
+        allUrlsMetadata: [],
+        status: "",
+        linkInfoFilter: {
+            urlContains: "",
+            showAssets: false,
+            showPages: true,
+        }
+    }
+
+    function getDomainsText(): string {
+        const sb = [];
+        for (const domain of state.selectedDomains) {
+            if (sb.length > 10) {
+                sb.push((state.selectedDomains.length - 10) + " more...")
+                break;
+            }
+
+            sb.push(domain);
+        }
+
+        return sb.join(", ");
+    }
+
+    const rg = newRenderGroup();
+    const root = div({ class: "flex-1 p-5 col" }, [
+        div({ class: "pointer b row p-5", style: "gap: 10px;" }, [
+            rg(SmallButton(), c => c.render({
+                text: state.currentScreen === "url" ? "Domains" : "Done",
+                onClick() {
+                    if (state.currentScreen === "url") {
+                        state.currentScreen = "domain";
+                        renderUrlExplorer();
+                    } else {
+                        state.currentScreen = "url";
+                        renderAsync();
+                    }
+                }
+            })),
+            rg.text(() => getDomainsText() + " " + state.selectedDomains.length + "/" + state.allDomains.length || "<No domain>"),
+        ]),
+        rg(DomainsScreen(), c => c.render({
+            state,
+            visible: state.currentScreen === "domain",
+        })),
+        rg(UrlsScreen(), c => c.render({
+            state,
+            onNavigate: s.args.onNavigate,
+            onHighlightUrl: s.args.onHighlightUrl,
+        })),
         makeSeparator(),
         div({}, [
-            rg.text(() => status),
+            rg.text(() => state.status),
         ]),
     ]);
 
-    function renderElements() {
-        if (!linkInfoFilter.showPages && !linkInfoFilter.showAssets) {
+    function renderUrlExplorer(refetch = false) {
+        if (refetch) {
+            renderAsync();
+            return;
+        }
+
+        if (!state.linkInfoFilter.showPages && !state.linkInfoFilter.showAssets) {
             // at least one of these must be true...
-            linkInfoFilter.showPages = true;
+            state.linkInfoFilter.showPages = true;
         }
 
         rg.render();
     }
 
-    function renderAction(fn: () => void) {
-        fn();
-        renderElements();
-    }
-
-    const linkInfoFilter: UrlListFilter = {
-        urlContains: "",
-        showAssets: false,
-        showPages: true,
-    };
-
-    let currentUrl: string | undefined;
-    let currentlyVisibleUrls: string[] = [];
-    let recentlyVisitedUrls: string[] = [];
-    let allUrls: string[] = [];
-    let allUrlsMetadata: UrlInfo[] = [];
-    let currentLinkInfo: UrlInfo | undefined;
-    let currentLinkInfoIsIncoming: boolean;
-    let status = "";
-
     const fetchState = newRefetcher({
         refetch: async () => {
-            status = "fetching url..."
-            renderElements();
+            state.status = "fetching url..."
+            renderUrlExplorer();
 
-            if (!currentUrl) {
-                currentUrl = await getCurrentTabUrl();
+            const tab = await getCurrentTab();
+            const tabId = tab?.id;
+            const tabUrl = tab?.url;
+
+            // fetch all domains and urls
+            {
+                // fetch the data
+
+                state.status = "loading all data..."
+                renderUrlExplorer();
+
+                const readTx: Record<string, any> = {};
+                for (const domain of state.selectedDomains) {
+                    readTx["allUrls:" + domain] = "allUrls:" + domain;
+                    readTx["allUrlsCount:" + domain] = "allUrls:" + domain;
+                }
+                if (tabId !== undefined) {
+                    readTx["currentVisibleUrlsRead"] = "currentVisibleUrls:" + tabId;
+                } else {
+                    readTx[SKIP_READ_KEY + "currentVisibleUrls"] = -1;
+                }
+
+                const data = await runReadTx(readTx);
+
+                // process the data
+
+                const currentVisibleUrlsRead = data["currentVisbleUrlsRead"];
+                state.allUrls = [];
+                for (const domain of state.selectedDomains) {
+                    const urls = data["allUrls:" + domain];
+                    if (urls) {
+                        state.allUrls.push(...urls);
+                    }
+                }
+
+                // TODO: fix to only be the recently visited ones instead of all of them...
+                state.recentlyVisitedUrls = state.allUrls || [];
+                state.currentlyVisibleUrls = currentVisibleUrlsRead || [];
             }
 
-            status = "fetching all urls..."
-            renderElements();
+            // fetch url metadata
+            {
+                const readTx2: Record<string, any> = {};
+                for (const url of state.allUrls) {
+                    readTx2[url] = getSchemaInstanceFields(URL_SCHEMA, url, [
+                        // TODO: ui should set thiS
+                        "linkText",
+                        "isAsset"
+                    ]);
+                }
 
-            const readTx: Record<string, any> = {};
-            readTx["allUrls"] = "allUrls";
-            readTx["currentVisibleUrls"] = "currentVisibleUrls";
+                state.status = "fetching url metadata..."
+                renderUrlExplorer();
+                const data = await runReadTx(readTx2);
 
-            const { 
-                allUrls: allUrlsRead, 
-                currentVisibleUrls: currentVisibleUrlsRead,
-            } = await runReadTx(readTx);
+                state.status = "done"
+                state.recentlyVisitedUrls = pluck(data, "allUrls") ?? [];
+                state.allUrlsMetadata = Object.values(data);
 
-            allUrls = allUrlsRead || [];
-
-            // TODO: fix to only be the recently visited ones instead of all of them...
-            recentlyVisitedUrls = allUrls || [];
-            currentlyVisibleUrls = currentVisibleUrlsRead || [];
-
-            const readTx2: Record<string, any> = {};
-            for (const url of allUrls) {
-                readTx2[url] = getSchemaInstanceFields(URL_SCHEMA, url, [
-                    "linkText",
-                    "isAsset"
-                ]);
+                renderUrlExplorer();
             }
 
-            status = "fetching url metadata..."
-            renderElements();
-            const data = await runReadTx(readTx2);
+            // make sure we have a domain enabled if applicable
+            if (state.selectedDomains.length === 0 && tabUrl) {
+                const tabDomain = getUrlDomain(tabUrl);
+                if (state.allDomains.find(d => d.url === tabDomain)) {
+                    setSelected(state.selectedDomains, tabDomain, true);
+                } else {
+                    setSelected(state.selectedDomains, tabDomain, false);
+                }
+            }
 
-            console.log({ readTx, allUrlsRead, allUrls, readTx2, data })
-
-            status = "done"
-            recentlyVisitedUrls = pluck(data, "allUrls") ?? [];
-            allUrlsMetadata = Object.values(data);
-
-            renderElements();
-
+            // reset the status
             setTimeout(() => {
-                status = "";
-                renderElements();
+                state.status = "";
+                renderUrlExplorer();
             }, 3000);
-        }, 
+        },
         onError: () => {
-            status = "An error occured: "  + fetchState.errorMessage;
-            renderElements();
+            state.status = "An error occured: " + fetchState.errorMessage;
+            renderUrlExplorer();
         }
     });
 
-    async function renderAsync() {
-        await fetchState.refetch();
+    function renderAsync() {
+        fetchState.refetch();
     }
 
-    function setCurrentUrl(url: string) {
-        currentUrl = url;
-        renderAsync();
-    }
-
-    function onHighlightSelected() {
-        if (currentUrl) {
-            s.args.onHighlightUrl(currentUrl);
-        }
-    }
-
-    function navigateToTopOfTabstack(newTab: boolean) {
-        if (currentUrl) {
-            s.args.onNavigate(currentUrl, newTab);
-        }
-    }
-
-    return newComponent(root, () => renderAsync(), s);
+    return newComponent(root, renderAsync, s);
 }

@@ -9,7 +9,10 @@ declare global {
     }
 }
 
+const MAX_STRING_SIZE = 100;
+
 let saving = false;
+let currentTabId = 0;
 let noneFound = false;
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
@@ -157,7 +160,12 @@ async function collectLinks() {
     currentMessage = "Saving new URLs...";
     renderPopup();
 
-    await saveOutgoingLinks(tabUrlString, links.map(result => result.linkInfo));
+    await saveOutgoingLinks({
+        type: "save_urls",
+        currentTablUrl: tabUrlString, 
+        urls: links.map(result => result.linkInfo),
+        tabId: null,
+    });
 }
 
 
@@ -281,9 +289,23 @@ function getLinks(): LinkQueryResult[] | undefined {
 
         try {
             // Convert the URL to an absolute url relative to the current origin.
-            const parsed = new URL(url, window.location.origin);
-            linkInfo.url = parsed.href;
-        } catch {
+            const parsed = new URL(url, window.location.href);
+            const parts = parsed.href.split("?", 2);
+            let updatedUrl = parts[0];
+            if (parts[1]) {
+                const params = new URLSearchParams(parts[1]);
+                for (const [k, v] of params) {
+                    if (v.length > 100) {
+                        params.delete(k);
+                    }
+                }
+                updatedUrl += "?" + parts.toString();
+            }
+
+            linkInfo.url = updatedUrl;
+
+        } catch(e) {
+            console.error("Error collecting link:", linkInfo, e);
             // this was an invalid url. dont bother collecting it
             return;
         }
@@ -308,8 +330,8 @@ function getLinks(): LinkQueryResult[] | undefined {
             let linkText = undefined;
             if (tag === "a") {
                 // truncate the link text if the text is too big
-                linkText = el.textContent?.substring(0, 500);
-                if (linkText && linkText?.length === 500) {
+                linkText = el.textContent?.trim().substring(0, MAX_STRING_SIZE);
+                if (linkText && linkText?.length === MAX_STRING_SIZE) {
                     linkText += "...";
                 }
             }
@@ -325,6 +347,7 @@ function getLinks(): LinkQueryResult[] | undefined {
 
     pushAllOfAttr("a", "href");
     if (enabledFlags.deepCollect) {
+        // TODO: something idk
     }
     pushAllOfAttr("link", "href", true);
     pushAllOfAttr("img", "src", true);

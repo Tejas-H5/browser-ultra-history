@@ -1,6 +1,6 @@
 import { setCssVars } from "src/utils/dom-utils";
 import browser, { browserAction } from "webextension-polyfill";
-import { NO_OP, WriteTx, clearKeys, getAllData, getSchemaInstance, newSchema, removeKey, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmpty } from "./default-storage-area";
+import { WriteTx, clearKeys, filterObject, getAllData, getSchemaInstanceFields, hasNewItems, mergeArrays, newSchema, removeKey, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmpty } from "./default-storage-area";
 import { logTrace } from "./utils/log";
 import { newTimer } from "./utils/perf";
 
@@ -28,19 +28,22 @@ export type Message = {
     // Ideally, we will never need to use this once this extension is working as it's intended, but it's useful for development
     type: "start_collection_from_tabs";
     tabIds?: TabId[];
-} | {
+} | SaveUrlsMessage | {
     type: "save_urls_finished",
     numNewUrls: number;
-    id: string;
-} | {
-    type: "save_urls";
-    currentTablUrl: string; 
-    urls: UrlInfo[];
+    id: TabId;
 } | {
     type: "content_collect_urls"
 } | {
     type: "content_highlight_url",
     url: string,
+};
+
+export type SaveUrlsMessage = {
+    type: "save_urls";
+    currentTablUrl: string; 
+    urls: UrlInfo[];
+    tabId: TabId | null;
 };
 
 export function sendMessage(message: Message) {
@@ -69,8 +72,7 @@ export type TabId = {
     tabId: number;
 }
 
-export async function getCurrentTabId(): Promise<TabId | undefined> {
-    const tab = await getCurrentTab();
+export function getTabId(tab: browser.Tabs.Tab | undefined): TabId | undefined {
     if (!tab?.id) {
         return undefined;
     }
@@ -79,7 +81,8 @@ export async function getCurrentTabId(): Promise<TabId | undefined> {
 }
 
 export async function sendMessageToCurrentTab(message: Message) {
-    const activeTab = await getCurrentTabId();
+    const tab = await getCurrentTab();
+    const activeTab = getTabId(tab);
     if (!activeTab) {
         return;
     }
@@ -258,47 +261,35 @@ export function saveUrlInfo(tx: WriteTx, urlInfo: UrlInfo, previousUrlInfo: UrlI
         return;
     }
 
-    setInstanceFieldKeys(tx, URL_SCHEMA, urlInfo, (key) => {
+    const filteredUrlInfo = filterObject(urlInfo, (key, newValue) => {
         const existingValue = previousUrlInfo[key];
-        const newValue = urlInfo[key];
+
+        if (key === "url") {
+            return newValue;
+        }
 
         if ((
             typeof existingValue === "string"
             || typeof existingValue === "boolean"
             || typeof existingValue === "number"
         ) && existingValue === newValue) {
-            return NO_OP;
+            return undefined;
         }
 
         if (isArrayOrUndefined(existingValue) && isArrayOrUndefined(newValue)) {
-            const arrayToWrite = mergeArrays(existingValue, newValue);
-            if (compareArrays(arrayToWrite, existingValue)) {
-                return NO_OP;
+            if (hasNewItems(existingValue, newValue)) {
+                return mergeArrays(existingValue, newValue);
             }
 
-            return arrayToWrite;
+            return undefined;
         }
 
         return newValue;
     });
 
+    setInstanceFieldKeys(tx, URL_SCHEMA, filteredUrlInfo);
+
     return;
-}
-
-function mergeArrays(a: undefined | string[], b: undefined | string[]) {
-    if(!a && !b) {
-        return undefined;
-    }
-
-    if (!a) {
-        return b;
-    }
-
-    if (!b) {
-        return a;
-    }
-
-    return [...new Set<string>([...a, ...b])];
 }
 
 // checks if two string arrays are equal in contents. will sort them in place for the final comparison.
@@ -329,61 +320,137 @@ function compareArrays(arr1: string[] | undefined, arr2: string[] | undefined): 
     return true;
 }
 
+export function separateByDomain(urls: UrlInfo[]): Record<string, UrlInfo[]> {
+    const domainMap: Record<string, UrlInfo[]> = {};
 
-export async function saveOutgoingLinks(
-    currentTablUrl: string, 
-    urls: UrlInfo[], 
-) {
+    for (const urlInfo of urls) {
+        const domain = getUrlDomain(urlInfo.url);
+        if (!domain) {
+            // Some urls don't have a valid domain, i.e "android-app://com.google.android.youtube/http/www.youtube.com/"
+            continue;
+        }
+        if (!(domain in domainMap)) {
+            domainMap[domain] = [];
+        }
+        domainMap[domain].push(urlInfo);
+    }
+
+    return domainMap;
+}
+
+export function getUrlDomain(url: string) {
+    // TODO: change to hostname, or somethign smarter
+    return new URL(url).hostname;
+}
+
+export type DomainData = {
+    url: string;
+    count: number;
+}
+
+export async function saveOutgoingLinks(args : SaveUrlsMessage) {
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {
-        sendMessage({ type: "save_urls", currentTablUrl, urls });
+        sendMessage(args);
         return;
     }
+
 
     const timer = newTimer();
     timer.logTime("Started");
 
-    timer.logTime("Preparing read tx")
-    const readTx: Record<string, any> = {};
-    for (const link of urls) {
-        readTx[link.url] = getSchemaInstance(URL_SCHEMA, link.url);
+    const {
+        currentTablUrl,
+        urls,
+        tabId,
+    } = args;
+
+
+    const domainMap = separateByDomain(urls);
+    const currentDomain = getUrlDomain(currentTablUrl);
+    if (!(currentDomain in domainMap)) {
+        domainMap[currentDomain] = [];
     }
-    readTx["allUrls"] = "allUrls";
 
-    timer.logTime("Running read tx")
-    const data = await runReadTx(readTx);
+    console.log("Saving urls", urls, domainMap);
 
-    timer.logTime("Preparing write tx")
-    const writeTx: WriteTx = {};
-    const newUrls: string[] = [];
-    for (const link of urls) {
-        const previousUrlInfo = data[link.url];
-        if (undefinedOrEmpty(previousUrlInfo)) {
-            newUrls.push(link.url);
+
+    // Read in the stuff
+    let data;
+    {
+        timer.logTime("Preparing read tx")
+
+        const readTx: Record<string, any> = {};
+        for (const link of urls) {
+            readTx[link.url] = getSchemaInstanceFields(URL_SCHEMA, link.url);
         }
-        saveUrlInfo(writeTx, link, previousUrlInfo);
+        for (const domain in domainMap) {
+            readTx["allUrls:" + domain] = "allUrls:" + domain;
+        }
+        readTx["allDomains"] = "allDomains";
+
+        timer.logTime("Running read tx")
+        data = await runReadTx(readTx);
     }
-    writeTx["allUrls"] = mergeArrays(newUrls, data["allUrls"]);
-    writeTx["currentVisibleUrls"] = urls.map(info => info.url);
 
-    timer.logTime("writing")
-    await runWriteTx(writeTx);
 
-    timer.logTime("Sending completion messages back to tabs...")
-    if (currentTablUrl) {
-        const tabs = await browser.tabs.query({ url: currentTablUrl });
-        const tabId = tabs[0]?.id;
-        if (tabs.length > 0 && tabId) {
-            timer.logTime("notifying the current tab...");
-            
-            await sendMessageToTabs({ 
-                type: "save_urls_finished", 
-                numNewUrls: newUrls.length, 
-                id: currentTablUrl  
-            }, tabId ? [{ tabId }] : undefined);
+    // Write back the new stuff. I stg it's faster to read the existing data and write the diff.
+    let numNewUrls = 0;
+    {
+        timer.logTime("Preparing write tx")
+
+        const writeTx: WriteTx = {};
+
+        for (const link of urls) {
+            const previousUrlInfo = data[link.url];
+            if (undefinedOrEmpty(previousUrlInfo, URL_SCHEMA)) {
+                numNewUrls += 1;
+            }
+
+            saveUrlInfo(writeTx, link, previousUrlInfo);
+        }
+
+        for (const domain in domainMap) {
+            const oldUrls = data["allUrls:" + domain];
+            const incomingUrls = domainMap[domain].map(i => i.url);
+            if (hasNewItems(oldUrls, incomingUrls)) {
+                const merged = mergeArrays(oldUrls, incomingUrls);
+                writeTx["allUrls:" + domain] = merged;
+                writeTx["allUrlsCount:" + domain] = merged!.length;
+            }
+        }
+
+        const oldDomains = data["allDomains"];
+        const incomingDomains = Object.keys(domainMap);
+        if (hasNewItems(oldDomains, incomingDomains)) {
+            writeTx["allDomains"] = mergeArrays(oldDomains, incomingDomains);
+        }
+
+        if (tabId) {
+            writeTx["currentVisibleUrls:" + tabId.tabId] = urls.map(info => info.url);
+        }
+
+        timer.logTime("writing")
+        await runWriteTx(writeTx);
+    }
+
+
+    // return messages back to the sending tab
+    {
+        timer.logTime("Sending completion messages back to tabs...")
+        if (tabId) {
+            const tab = await browser.tabs.get(tabId.tabId);
+            if (tab) {
+                timer.logTime("notifying the current tab...");
+
+                await sendMessageToTabs({
+                    type: "save_urls_finished",
+                    numNewUrls,
+                    id: tabId
+                }, [tabId]);
+            }
         }
     }
-
     timer.logTime("DONE!")
     timer.stop();
 }
@@ -444,10 +511,6 @@ export async function getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
     return tabs[0];
 }
 
-export async function getCurrentTabUrl(): Promise<string | undefined> {
-    const tab = await getCurrentTab();
-    return tab?.url;
-}
 
 export async function collectUrlsFromActiveTab() {
     return await sendMessageToCurrentTab({ type: "content_collect_urls" });
@@ -466,4 +529,5 @@ function formatNumberForBadge(num: number): string {
 
     return "inf";
 }
+
 

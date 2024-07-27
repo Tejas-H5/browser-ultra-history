@@ -2,7 +2,7 @@ import browser from "webextension-polyfill";
 
 const defaultStorageArea = browser.storage.local;
 
-let debug = true;
+let debug = false;
 
 export async function getAll() {
     return await defaultStorageArea.get(null);
@@ -79,24 +79,29 @@ export function isTypeKey<T extends string[]>(key: string, schema: Schema<T>) {
     return key.startsWith(schema.type);
 }
 
+export const SKIP_READ_KEY = "$$SKIP_READ$$";
+
 /**
  * Use this to get object keys that you might put into a read transaction
  */
-export function getSchemaInstance<T extends string[]>(schema: Schema<T>, id: string): Record<string, string> {
+export function getSchemaInstanceFields<T extends string[]>(schema: Schema<T>, id: string, fields?: T[number][]): Record<string, string> {
     const keys: Record<string, string> = {};
-    for (const field of schema.fields) {
-        keys[field] = makeTypeFieldIdKey(schema.type, field, id);
+    if (!fields) {
+        fields = schema.fields;
+    } 
+    if (!fields.includes(schema.idField)) {
+        fields.push(schema.idField);
     }
-    return keys;
-}
-
-export function getSchemaInstanceFields<T extends string[]>(schema: Schema<T>, id: string, fields: T[number][]): Record<string, string> {
-    const keys: Record<string, string> = {};
     for (const field of fields) {
+        if (field === schema.idField) {
+            // Don't bother writing the ID field, we already know what that is. We'll add it to the readTx anyway, and
+            // then the runReadTx method can have a carve-out for this type of key, where it will just set it without doing a database read
+            const key = SKIP_READ_KEY + field;
+            keys[key] = id;
+            continue;
+        }
+
         keys[field] = makeTypeFieldIdKey(schema.type, field, id);
-    }
-    if (!(schema.idField in keys)) {
-        keys[schema.idField] = makeTypeFieldIdKey(schema.type, schema.idField, id);
     }
     return keys;
 }
@@ -111,7 +116,6 @@ export function setInstanceFieldKeys<K extends string[], T extends Record<string
     tx: WriteTx, 
     schema: Schema<K>, 
     data: T, 
-    rewritingPredicate?: (key: keyof T) => any,
 ) {
     const id = data[schema.idField];
     if (!id) {
@@ -119,28 +123,73 @@ export function setInstanceFieldKeys<K extends string[], T extends Record<string
     }
 
     for (const field of schema.fields) {
+        if (field === schema.idField) {
+            continue;
+        }
+
         if (field in data) {
             let value = data[field];
-
-            if (rewritingPredicate) {
-                value = rewritingPredicate(field);
-                if (value === NO_OP) {
-                    continue;
-                }
-            }
-
             const key = makeTypeFieldIdKey(schema.type, field, id);
             tx[key] = value;
         }
     }
 }
 
-export function undefinedOrEmpty(obj: any): boolean {
+export function mergeArrays(a: undefined | string[], b: undefined | string[]) {
+    if(!a && !b) {
+        return undefined;
+    }
+
+    if (!a) {
+        return b;
+    }
+
+    if (!b) {
+        return a;
+    }
+
+    return [...new Set([...a, ...b])];
+}
+
+export function hasNewItems(existing: unknown[] | undefined, incoming: unknown[] | undefined) {
+    // NOTE: order matters
+    if (!incoming) return false;
+    if (!existing) return true;
+
+    for (const item in incoming) {
+        if (!existing.includes(item)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+export function filterObject<T extends Record<string, any>>(
+    obj: T, 
+    rewritingPredicate: (key: keyof T, value: T[keyof T]) => any,
+): Record<string, any> {
+    const filtered: Record<string, any> = {};
+
+    for (const k in obj) {
+        const val = rewritingPredicate(k, obj[k]);
+        if (val !== undefined) {
+            filtered[k] = val;
+        }
+    }
+
+    return filtered;
+}
+
+export function undefinedOrEmpty(obj: any, schema: Schema<any>): boolean {
     if (obj === undefined) {
         return true;
     }
 
-    for (const _k in obj) {
+    for (const k in obj) {
+        if (k === schema.idField) {
+            continue;
+        }
         return false;
     }
 
@@ -185,6 +234,10 @@ export async function runReadTx(tx: ReadTx): Promise<any> {
             }
 
             for (const k in tx) {
+                if (k.startsWith(SKIP_READ_KEY)) {
+                    continue;
+                }
+
                 dfs(tx[k]);
             }
             return;
@@ -195,11 +248,6 @@ export async function runReadTx(tx: ReadTx): Promise<any> {
     dfs(tx);
 
     const data = await getKeys(flatKeys);
-
-    console.log("keys gotten", {
-        data, 
-        flatKeys
-    });
 
     const dfs2 = (tx: ReadTx): any => {
         if (typeof tx === "string") {
@@ -227,6 +275,12 @@ export async function runReadTx(tx: ReadTx): Promise<any> {
             const obj: Record<string, any> = {};
 
             for (const k in tx) {
+                if (k.startsWith(SKIP_READ_KEY)) {
+                    const idField = k.substring(SKIP_READ_KEY.length);
+                    obj[idField] = tx[k];
+                    continue;
+                }
+
                 const txPart = tx[k];
                 const value = dfs2(txPart);
                 if (value !== undefined) {

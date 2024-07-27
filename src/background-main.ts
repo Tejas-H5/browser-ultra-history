@@ -114,7 +114,11 @@ recieveMessage((message, sender) => {
     }
 
     if(message.type === "save_urls") {
-        saveOutgoingLinks(message.currentTablUrl, message.urls);
+        const tabId = sender.tab?.id;
+        if (tabId) {
+            message.tabId = { tabId };
+        }
+        saveOutgoingLinks(message);
         return;
     }
 });

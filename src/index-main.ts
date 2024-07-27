@@ -1,10 +1,9 @@
-import { appendChild, div, el, newComponent, newInsertable, newListRenderer, newRenderGroup } from 'src/utils/dom-utils';
-import { CollectedUrlsViewer } from './collected-urls-viewer';
+import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import { getAllData, onStateChange } from './default-storage-area';
-import { NetworkGraph } from './network-graph';
+import { navigateToUrl } from './open-pages';
 import { getRecentlyVisitedUrls, getTheme, setTheme } from './state';
 import { TopBar } from './top-bar';
-import { LinkItem } from './url-explorer';
+import { UrlExplorer } from './url-explorer';
 import { newRefetcher } from './utils/refetcher';
 
 if (process.env.ENVIRONMENT === "dev") {
@@ -23,24 +22,21 @@ function App() {
             ]),
             div({ class: "flex-1 row " }, [
                 div({ class: "flex-1 col" }, [
-                    div({ class: "flex-1 col" }, [
-                        rg.c(NetworkGraph())
-                    ]),
-                    div({ class: "flex-1 col" }, [
-                        rg(CollectedUrlsViewer(), c => c.render(allData)),
-                    ]),
-                ]),
-                div({ style: "width: 25%" }, [
-                    el("H3", {}, "Recently visited"),
-                    rg(newListRenderer(div(), LinkItem), c => c.render((getNext) => {
-                        for(const url of recentUrls) {
-                            getNext().render({ 
-                                linkUrl: url,
-                                onClick: onNavigate,
-                            });
+                    // div({ class: "flex-1 col" }, [
+                    //     rg.c(NetworkGraph())
+                    // ]),
+                    // div({ class: "flex-1 col" }, [
+                    //     rg(CollectedUrlsViewer(), c => c.render(allData)),
+                    // ]),
+                    rg(UrlExplorer(), c => c.render({
+                        onNavigate(url, newTab) {
+                            navigateToUrl(url, true, false);
+                        },
+                        onHighlightUrl(url) {
+                            console.log("TODO");
                         }
-                    }))
-                ])
+                    })),
+                ]),
             ])
         ])
     ]);
@@ -72,10 +68,6 @@ function App() {
 
     function render() {
         rg.render();
-    }
-
-    function onNavigate(url: string) {
-        // TODO: open new tab to url, or copy to clipboard
     }
 
     async function renderAsync() {
