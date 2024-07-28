@@ -4,7 +4,6 @@ import { renderContext } from './render-context';
 import { SmallButton } from './small-button';
 import { EnabledFlags, clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getEnabledFlags, getStateJSON, loadStateJSON, setEnabledFlags } from './state';
 import { loadFile, saveText } from './utils/file-download';
-import { newRefetcher } from './utils/refetcher';
 
 
 export function TopBar(isMain: boolean) {
@@ -16,7 +15,7 @@ export function TopBar(isMain: boolean) {
             onClick: async () => {
                 enabledFlags.extension = !enabledFlags.extension;
                 await setEnabledFlags(enabledFlags);
-                refetcher.refetch();
+                await refetchState();
             },
             toggled: enabledFlags.extension,
         })),
@@ -26,7 +25,7 @@ export function TopBar(isMain: boolean) {
             onClick: async () => {
                 enabledFlags.deepCollect = !enabledFlags.deepCollect;
                 await setEnabledFlags(enabledFlags);
-                refetcher.refetch();
+                await refetchState();
             },
             // extension MUST be on for any of the other flags to take effect.
             toggled: (enabledFlags.extension && enabledFlags.deepCollect),
@@ -36,7 +35,7 @@ export function TopBar(isMain: boolean) {
                 text: "Collect from this tab",
                 onClick: async () => {
                     await collectUrlsFromActiveTab();
-                    refetcher.refetch();
+                    await refetchState();
                 }
             }))
         ),
@@ -45,7 +44,6 @@ export function TopBar(isMain: boolean) {
                 text: "Collect from all tab",
                 onClick: async () => {
                     await collectUrlsFromTabs();
-                    refetcher.refetch();
                 }
             }))
         ),
@@ -54,7 +52,7 @@ export function TopBar(isMain: boolean) {
                 text: "Clear",
                 onClick: async () => {
                     await clearAllData();
-                    refetcher.refetch();
+                    await refetchState();
                 }
             }))
         ),
@@ -70,7 +68,7 @@ export function TopBar(isMain: boolean) {
                 text: "Open Extension Tab",
                 onClick: async () => {
                     await openExtensionTab();
-                    refetcher.refetch();
+                    await refetchState();
                 }
             })),
         ] : [
@@ -106,8 +104,8 @@ export function TopBar(isMain: boolean) {
         deepCollect: false, 
     };
 
-    const refetcher = newRefetcher({
-        refetch: async () => {
+    async function refetchState() {
+        try {
             render();
 
             enabledFlags = await getEnabledFlags();
@@ -115,11 +113,10 @@ export function TopBar(isMain: boolean) {
             render();
 
             firstRefetch = true;
-        }, 
-        onError: () => {
+        } catch(e) {
             render();
         }
-    });
+    }
 
     function render() {
         rg.render();
@@ -127,7 +124,7 @@ export function TopBar(isMain: boolean) {
 
     async function rerenderAsync() {
         if (!firstRefetch  || renderContext.forceRefetch) {
-            await refetcher.refetch();
+            await refetchState();
         }
     }
 

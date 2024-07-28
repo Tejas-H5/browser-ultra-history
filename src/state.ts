@@ -343,11 +343,6 @@ export function getUrlDomain(url: string) {
     return new URL(url).hostname;
 }
 
-export type DomainData = {
-    url: string;
-    count: number;
-}
-
 export async function saveOutgoingLinks(args : SaveUrlsMessage) {
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {

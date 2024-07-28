@@ -1,6 +1,5 @@
 import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
 import { onStateChange } from './default-storage-area';
-import { navigateToUrl } from './open-pages';
 import { renderContext } from './render-context';
 import { getTheme, sendMessageToCurrentTab, setTheme } from './state';
 import { TopBar } from './top-bar';
@@ -21,9 +20,7 @@ function PopupAppRoot() {
         rg.c(TopBar(false)),
         div({ class: "flex-1 col" }, [
             rg(UrlExplorer(), c => c.render({
-                onNavigate(url, newTab) {
-                    navigateToUrl(url, newTab, true);
-                },
+                openInNewTab: false,
                 onHighlightUrl,
             })),
         ]),

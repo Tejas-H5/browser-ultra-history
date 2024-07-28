@@ -299,7 +299,7 @@ function getLinks(): LinkQueryResult[] | undefined {
                         params.delete(k);
                     }
                 }
-                updatedUrl += "?" + parts.toString();
+                updatedUrl += "?" + params.toString();
             }
 
             linkInfo.url = updatedUrl;

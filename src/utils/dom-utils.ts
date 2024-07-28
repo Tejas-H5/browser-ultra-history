@@ -940,3 +940,21 @@ export function newStyleGenerator(): StyleGenerator {
 
     return obj;
 }
+
+/**
+ * Inspired by React's useMemo. 
+ * You would only use this to prevent recomputations of expensive values in 
+ * a render function.
+ */
+export function inputsChanged(lastInputs: any[], inputs: any[]): boolean {
+    let changed = false;
+    for (let i = 0; i < inputs.length; i++) {
+        if (lastInputs[i] !== inputs[i]) {
+            changed  = true;
+            // exploiting the broken nature of JS - no array resizing or pushing required - this already does upserting
+            lastInputs[i] = inputs[i];
+        }
+    }
+
+    return changed;
+}

@@ -11,6 +11,10 @@ export function swap(arr: unknown[], a: number, b: number) {
     arr[b] = temp;
 }
 
+export function clear(arr: unknown[]) {
+    arr.splice(0, arr.length);
+}
+
 export function filterInPlace<T>(arr: T[], predicate: (v: T) => boolean) {
     for (let i = 0; i < arr.length; i++) {
         if (!predicate(arr[i])) {

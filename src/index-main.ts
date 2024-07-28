@@ -1,10 +1,8 @@
 import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
-import { getAllData, onStateChange } from './default-storage-area';
-import { navigateToUrl } from './open-pages';
-import { getRecentlyVisitedUrls, getTheme, setTheme } from './state';
+import { onStateChange } from './default-storage-area';
+import { getTheme, setTheme } from './state';
 import { TopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
-import { newRefetcher } from './utils/refetcher';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")
@@ -22,16 +20,8 @@ function App() {
             ]),
             div({ class: "flex-1 row " }, [
                 div({ class: "flex-1 col" }, [
-                    // div({ class: "flex-1 col" }, [
-                    //     rg.c(NetworkGraph())
-                    // ]),
-                    // div({ class: "flex-1 col" }, [
-                    //     rg(CollectedUrlsViewer(), c => c.render(allData)),
-                    // ]),
                     rg(UrlExplorer(), c => c.render({
-                        onNavigate(url, newTab) {
-                            navigateToUrl(url, true, false);
-                        },
+                        openInNewTab: true,
                         onHighlightUrl(url) {
                             console.log("TODO");
                         }
@@ -41,50 +31,29 @@ function App() {
         ])
     ]);
 
-    let allData: any | undefined;
-    let recentUrls: string[] = [];
-
-    const c = newComponent(appRoot, () => renderAsync());
-
-    const fetchState = newRefetcher({
-        refetch: async () => {
+    let fetching = false;
+    async function refetchState() {
+        try {
+            fetching = true;
             render();
-
-            allData = await getAllData();
-
-            render();
-
-            recentUrls = await getRecentlyVisitedUrls();
-
-            render();
-
-            recentUrls.reverse();
-
-            render();
-        }, onError: () => {
+        } catch (e) {
+            // TODO: Log the error in a better place
+            console.error("Error refetching main state:", e);
+        } finally {
+            fetching = false;
             render();
         }
-    });
+    }
 
     function render() {
         rg.render();
     }
 
     async function renderAsync() {
-        if (asyncStateInvalidated) {
-            asyncStateInvalidated = false;
-
-            await fetchState.refetch();
-
-            if (fetchState.state !== "loaded") {
-                asyncStateInvalidated = true;
-            }
-        }
-
-        render();
+        await refetchState();
     }
 
-    return c;
+    return newComponent(appRoot, () => renderAsync());
 }
 
 const app = App();
@@ -98,11 +67,9 @@ function rerenderApp() {
 }
 
 let stateChangeDebounceTimout = 0;
-let asyncStateInvalidated = true;
 onStateChange(() => {
     clearTimeout(stateChangeDebounceTimout);
     stateChangeDebounceTimout = setTimeout(() => {
-        asyncStateInvalidated = true;
         rerenderApp();
     }, 1000);
 });
