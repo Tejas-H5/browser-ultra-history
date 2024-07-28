@@ -454,7 +454,7 @@ function DomainsScreen() {
                             setSelectedSet(state.selectedDomains, domain.url, shouldSelect);
                         }
 
-                        state.renderUrlExplorer();
+                        s.args.state.refetchData({ refetchUrls: true });
                     }
                 })
             }),
@@ -874,7 +874,7 @@ export function UrlExplorer() {
                         readTx["allUrlsCount:" + domain] = "allUrlsCount:" + domain;
                     }
                     if (tabId !== undefined) {
-                        readTx["currentVisibleUrlsRead"] = "currentVisibleUrls:" + tabId;
+                        readTx["currentVisbleUrlsRead"] = "currentVisibleUrls:" + tabId;
                     } else {
                         readTx[SKIP_READ_KEY + "currentVisibleUrls"] = -1;
                     }
@@ -938,7 +938,8 @@ export function UrlExplorer() {
                 }
             }
 
-            state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms";
+            state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms"
+                + " (cache had " + kvCache.size + " entries)";
             renderUrlExplorer();
         } catch (e) {
             state.status = "An error occured: " + e;
@@ -1013,6 +1014,7 @@ export function UrlExplorer() {
     }
 
     function renderAsync() {
+        console.log("cleared");
         kvCache.clear();
         refetchData({ refetchDomains: true, refetchUrls: true });
     }

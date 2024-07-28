@@ -1,4 +1,4 @@
-import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
+import { appendChild, div, newComponent, newInsertable, newRenderGroup, setVisible } from 'src/utils/dom-utils';
 import { onStateChange } from './default-storage-area';
 import { renderContext } from './render-context';
 import { getTheme, sendMessageToCurrentTab, setTheme } from './state';
@@ -27,7 +27,19 @@ function PopupAppRoot() {
     ]);
 
     function onHighlightUrl(url: string) {
+        setVisible(appRoot, false);
         sendMessageToCurrentTab({ type: "content_highlight_url", url })
+
+        body.style.width = "1px";
+        body.style.height = "1px";
+
+        setTimeout(() => {
+            body.style.width = "800px";
+            body.style.height = "600px";
+            setVisible(appRoot, true);
+            // TODO: we should really await the animation rather than hardcoding the delay.
+            // That seems like a pain to do though, so I've not done it yet
+        }, 1000);
     }
 
     function render() {

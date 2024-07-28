@@ -366,8 +366,6 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
         domainMap[currentDomain] = [];
     }
 
-
-
     // Read in the stuff
     let data;
     {

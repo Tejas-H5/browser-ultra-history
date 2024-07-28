@@ -218,12 +218,17 @@ export async function runReadTx(tx: ReadTx, kvCache?: Map<string, any>): Promise
 
     const dfs = (tx: ReadTx) => {
         if (typeof tx === "string") {
-            if (kvCache && (tx in kvCache)) {
-                // use the cache if we can. 
+            // use the cache if we can. else, we need to fetch this key from the database
+            if (kvCache?.has(tx)) {
                 data.set(tx, kvCache.get(tx));
             } else {
-                // else, we need to fetch this key from the database
                 flatKeys.push(tx);
+
+                if (kvCache) {
+                    // the undefined response also needs to be cached. If it was actually contained in
+                    // the storage area, it should be populated later in this code anyway
+                    kvCache.set(tx, undefined);
+                }
             }
 
             return;
@@ -258,11 +263,11 @@ export async function runReadTx(tx: ReadTx, kvCache?: Map<string, any>): Promise
 
     const dataFromDb = await getKeys(flatKeys);
     for (const k in dataFromDb) {
-        const val = dataFromDb[k];;
+        const val = dataFromDb[k];
         data.set(k, val);
 
         if (kvCache) {
-            kvCache.set(k, val)
+            kvCache.set(k, val);
         }
     }
 

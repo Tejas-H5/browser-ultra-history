@@ -23,7 +23,6 @@ function App() {
                     rg(UrlExplorer(), c => c.render({
                         openInNewTab: true,
                         onHighlightUrl(url) {
-                            console.log("TODO");
                         }
                     })),
                 ]),
