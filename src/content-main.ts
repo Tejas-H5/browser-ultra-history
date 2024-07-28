@@ -1,6 +1,6 @@
 import { forEachMatch, } from "src/utils/re";
 import { onStateChange } from "./default-storage-area";
-import { EnabledFlags, UrlInfo, getEnabledFlags, newUrlInfo, recieveMessage, saveOutgoingLinks, sendLog as sendLogImported } from "./state";
+import { EnabledFlags, UrlInfo, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
 import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
 
 declare global {
@@ -160,7 +160,7 @@ async function collectLinks() {
     currentMessage = "Saving new URLs...";
     renderPopup();
 
-    await saveOutgoingLinks({
+    await saveNewUrls({
         type: "save_urls",
         currentTablUrl: tabUrlString, 
         urls: links.map(result => result.linkInfo),
@@ -384,7 +384,7 @@ function getLinks(): LinkQueryResult[] | undefined {
                 const url = matches[1];
 
                 const styleName = getStyleName(val, start);
-                pushUrl({ url: url, styleName: [styleName], isAsset: true }, el);
+                pushUrl({  url: url, styleName: [styleName], isAsset: true }, el);
             });
         }
 

@@ -52,7 +52,7 @@ export async function getAllData() {
  */
 export type ReadTx = Record<string, string | any> | (string | any)[] | string;
 
-export type WriteTx = Record<string, any>;
+export type WriteTx<T = any> = Record<string, T>;
 
 export function newTransaction(): ReadTx {
     return {};
@@ -118,7 +118,7 @@ export function setInstanceFieldKeys<K extends string[], T extends Record<string
     data: T, 
 ) {
     const id = data[schema.idField];
-    if (!id) {
+    if (id === undefined) {
         throw new Error("data was missing the id field, which is _required_ if you want to save it");
     }
 
@@ -135,7 +135,8 @@ export function setInstanceFieldKeys<K extends string[], T extends Record<string
     }
 }
 
-export function mergeArrays(a: undefined | string[], b: undefined | string[]) {
+type Mergable = string | number | boolean;
+export function mergeArrays(a: undefined | Mergable[], b: undefined | Mergable[]) {
     if(!a && !b) {
         return undefined;
     }
@@ -181,7 +182,7 @@ export function filterObject<T extends Record<string, any>>(
     return filtered;
 }
 
-export function undefinedOrEmpty(obj: any, schema: Schema<any>): boolean {
+export function undefinedOrEmptyInstance(obj: any, schema: Schema<any>): boolean {
     if (obj === undefined) {
         return true;
     }
@@ -211,12 +212,20 @@ export function undefinedOrEmpty(obj: any, schema: Schema<any>): boolean {
  * const [ k1, k2, k3 ] = c;
  * ```
  */
-export async function runReadTx(tx: ReadTx): Promise<any> {
+export async function runReadTx(tx: ReadTx, kvCache?: Map<string, any>): Promise<any> {
     const flatKeys: string[] = [];
+    const data = new Map<string, any>();
 
     const dfs = (tx: ReadTx) => {
         if (typeof tx === "string") {
-            flatKeys.push(tx);
+            if (kvCache && (tx in kvCache)) {
+                // use the cache if we can. 
+                data.set(tx, kvCache.get(tx));
+            } else {
+                // else, we need to fetch this key from the database
+                flatKeys.push(tx);
+            }
+
             return;
         }
 
@@ -247,11 +256,19 @@ export async function runReadTx(tx: ReadTx): Promise<any> {
     }
     dfs(tx);
 
-    const data = await getKeys(flatKeys);
+    const dataFromDb = await getKeys(flatKeys);
+    for (const k in dataFromDb) {
+        const val = dataFromDb[k];;
+        data.set(k, val);
+
+        if (kvCache) {
+            kvCache.set(k, val)
+        }
+    }
 
     const dfs2 = (tx: ReadTx): any => {
         if (typeof tx === "string") {
-            return data[tx];
+            return data.get(tx)!;
         }
 
         if (Array.isArray(tx)) {

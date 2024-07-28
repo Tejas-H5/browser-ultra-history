@@ -1,7 +1,7 @@
-import { SKIP_READ_KEY, getSchemaInstanceFields, pluck, runReadTx } from "./default-storage-area";
+import { SKIP_READ_KEY, getSchemaInstanceFields, runReadTx } from "./default-storage-area";
 import { navigateToUrl } from "./open-pages";
 import { SmallButton } from "./small-button";
-import { URL_SCHEMA, UrlInfo, getCurrentTab, getUrlDomain } from "./state";
+import { UrlInfo, getCurrentTab, getUrlDomain, urlSchema } from "./state";
 import { clear, filterInPlace } from "./utils/array-utils";
 import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, setVisible, span } from "./utils/dom-utils";
 
@@ -29,21 +29,20 @@ function deselectRanges() {
 
 export function LinkItem() {
     const s = newState<{
-        url: string;
-        linkText: string;
-        onClick(url: string, type: SelectionType): void;
+        urlInfo: UrlInfo;
+        urlText: string;
+        onClick(info: UrlInfo, type: SelectionType): void;
         isSelected : boolean;
 
         index?: number;
-        linkInfo?: UrlInfo;
         isVisibleOnCurrentPage?: boolean;
     }>();
 
     const rg = newRenderGroup();
     const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
         rg.text(() => s.args.isVisibleOnCurrentPage ? "[Visible] " : ""),
-        rg.text(() => s.args.linkText),
-        rg.text(() => " (" + s.args.url + ")"),
+        rg.text(() => s.args.urlText),
+        rg.text(() => " (" + s.args.urlInfo.url + ")"),
     ]);
 
     function render() {
@@ -53,9 +52,9 @@ export function LinkItem() {
     }
 
     on(root, "click", (e) => {
-        const { onClick, url: linkUrl } = s.args;
+        const { onClick, urlInfo: linkInfo } = s.args;
 
-        onClick(linkUrl, getSelectionType(e));
+        onClick(linkInfo, getSelectionType(e));
     });
 
     return newComponent(root, render, s);
@@ -85,51 +84,6 @@ function urlInfoContains(urlInfo: UrlInfo, queryStr: string):  boolean {
         contains(urlInfo.linkImage, queryStr);
 }
 
-function filterUrls(
-    src: UrlInfo[], 
-    dst: UrlInfo[], 
-    urlHistory: string[],
-    filter: UrlListFilter,
-) {
-    dst.splice(0, dst.length);
-
-    function pushSubset(recent: boolean) {
-        for (const urlInfo of src) {
-            const linkUrl = urlInfo.url;
-            const isRecent = urlHistory.includes(linkUrl);
-
-            if (recent !== isRecent) {
-                continue;
-            }
-
-            if (!filter.showAssets && urlInfo.isAsset) {
-                continue;
-            }
-
-            if (!filter.showPages && !urlInfo.isAsset) {
-                continue;
-            }
-
-            // This expensive check goes last
-            if (filter.urlContains && (
-                !urlInfoContains(urlInfo, filter.urlContains)
-            )) {
-                // fallback to splitting the query string and anding all the results
-                if (!filter.urlContains.split(" ").every(queryPart => {
-                    return urlInfoContains(urlInfo, queryPart.trim());
-                })) {
-                    continue;
-                }
-            }
-
-            dst.push(urlInfo);
-        }
-    }
-
-    pushSubset(true);
-    pushSubset(false);
-}
-
 function getFirstOrNone<T>(set: Set<T>): T | undefined {
     if (set.size > 1) {
         return undefined;
@@ -144,7 +98,6 @@ function getFirstOrNone<T>(set: Set<T>): T | undefined {
 
 function UrlList()  {
     const s = newState<{
-        links: UrlInfo[]; 
         state: UrlExplorerState;
         title: string;
     }>();
@@ -160,7 +113,7 @@ function UrlList()  {
         div({ class: "row justify-content-center", style: "padding: 0 10px;" }, [
             div({ class: "b" }, [rg.text(() => {
                 const { state } = s.args;
-                const total = s.args.links.length;
+                const total = state.allUrls.size;
                 const filtered = state._filteredUrls.length;
 
                 if (total !== filtered) {
@@ -181,11 +134,11 @@ function UrlList()  {
                     // mainly for debugging, toggle as needed
                     // index: i,
 
-                    url: linkUrl,
-                    linkText: urlInfo.linkText?.join(", ") ?? "",
-                    onClick(url, type) {
+                    urlInfo: urlInfo,
+                    urlText: urlInfo.linkText?.join(", ") ?? "",
+                    onClick(urlInfo, type) {
                         const { state } = s.args;
-                        const index = state._filteredUrls.findIndex(info => info.url === url);
+                        const index = state._filteredUrls.findIndex(info => info === urlInfo);
                         if (index === -1) {
                             return;
                         }
@@ -194,7 +147,7 @@ function UrlList()  {
                         state._filteredUrlsLastSelectedIdx = index;
 
                         updateSelection(
-                            url,
+                            urlInfo.url,
                             index,
                             state.selectedUrls,
                             (i) => state._filteredUrls[i].url,
@@ -207,7 +160,6 @@ function UrlList()  {
 
                         state.renderUrlExplorer();
                     },
-                    linkInfo: urlInfo,
                     isVisibleOnCurrentPage: isVisible,
                     isSelected: selectedUrls.has(urlInfo.url),
                 });
@@ -359,7 +311,7 @@ function makeSeparator() {
     return div({ style: "height: 1px; background-color: var(--fg-color)" });
 }
 
-function setSelectedSet(set: Set<string>, key: string, val: boolean) {
+function setSelectedSet<K extends string | number>(set: Set<K>, key: K, val: boolean) {
     if (val) {
         set.add(key);
     } else {
@@ -382,11 +334,11 @@ function setSelectedArray(array: string[], key: string, val: boolean) {
 
 type SelectionType = "replace" | "range" | "toggle";
 
-function updateSelection(
-    key: string,
+function updateSelection<K extends string | number>(
+    key: K,
     selectIdx: number,
-    selectedSet: Set<string>,
-    getKey: (i: number) => string,
+    selectedSet: Set<K>,
+    getKey: (i: number) => K,
     numKeys: number,
     lastIdx: number,
     type: SelectionType
@@ -551,7 +503,8 @@ function DomainsScreen() {
 
                         deselectRanges();
 
-                        state.refetchData({ refetchDomains: true, refetchUrls: true });
+                        s.args.state.refetchData({ refetchUrls: true });
+
                         return;
                     }
                 });
@@ -563,7 +516,7 @@ function DomainsScreen() {
     function renderDomainsScreen() {
         if (lastVisible !== setVisible(root, s.args.visible)) {
             lastVisible = s.args.visible;
-            s.args.state.renderUrlExplorer();
+            s.args.state.refetchData({ refetchDomains: true });
             return;
         }
 
@@ -637,13 +590,19 @@ function UrlsScreen() {
             ]),
             rg(SmallButton(), c => c.render({
                 text: "Pages",
-                onClick: () => renderAction(() => s.args.state.urlFilter.showPages = !s.args.state.urlFilter.showPages),
+                onClick() {
+                    s.args.state.urlFilter.showPages = !s.args.state.urlFilter.showPages;
+                    s.args.state.renderUrlExplorer();
+                },
                 toggled: s.args.state.urlFilter.showPages,
                 noBorderRadius: true,
             })),
             rg(SmallButton(), c => c.render({
                 text: "Assets",
-                onClick: () => renderAction(() => s.args.state.urlFilter.showAssets = !s.args.state.urlFilter.showAssets),
+                onClick() {
+                    s.args.state.urlFilter.showAssets = !s.args.state.urlFilter.showAssets;
+                    s.args.state.renderUrlExplorer();
+                },
                 toggled: s.args.state.urlFilter.showAssets,
                 noBorderRadius: true,
             })),
@@ -652,7 +611,6 @@ function UrlsScreen() {
         div({ class: "flex-1 col" }, [
             rg(UrlList(), c => c.render({
                 // TODO: links on this domain
-                links: s.args.state.allUrlsMetadata,
                 title: "All",
                 state: s.args.state,
             })),
@@ -679,17 +637,11 @@ function UrlsScreen() {
         ])
     ]);
 
-    function renderAction(fn: () => void) {
-        fn();
-        renderUrlsScreen();
-    }
-
     function onHighlightSelected() {
         const { state } = s.args;
-        const currentUrl = getFirstOrNone(state.selectedUrls);
-        
-        if (currentUrl) {
-            s.args.onHighlightUrl(currentUrl);
+        const urlInfo = getCurrentUrlInfo(state);
+        if (urlInfo) {
+            s.args.onHighlightUrl(urlInfo.url);
         }
     }
 
@@ -714,8 +666,8 @@ type UrlExplorerState = {
     urlFilter: UrlListFilter;
     currentScreen: "url" | "domain";
     currentlyVisibleUrls: string[];
-    recentlyVisitedUrls: string[];
     selectedUrls: Set<string>;
+    allUrls: Map<string, UrlInfo>;
     _filteredUrls: UrlInfo[];
     _filteredUrlsLastSelectedIdx: number;
     selectedDomains: Set<string>;
@@ -725,10 +677,19 @@ type UrlExplorerState = {
     };
     _filteredDomains: DomainData[];
     _filteredDomainsLastSelectedIdx: number;
-    allUrlsMetadata: UrlInfo[];
     currentLinkInfo?: UrlInfo;
     status: string;
 };
+
+function getCurrentUrlInfo(state: UrlExplorerState): UrlInfo | undefined {
+    const currentId = getFirstOrNone(state.selectedUrls);
+    if (!currentId) {
+        return;
+    }
+
+    return state.allUrls.get(currentId);
+}
+
 
 export function UrlExplorer() {
     const s = newState<{
@@ -736,12 +697,13 @@ export function UrlExplorer() {
         onHighlightUrl(url: string): void;
     }>();
 
+    const kvCache = new Map<string, any>();
+
     const state: UrlExplorerState = {
         renderUrlExplorer,
         refetchData,
         currentScreen: "url",
         currentlyVisibleUrls: [],
-        recentlyVisitedUrls: [],
         selectedUrls: new Set(),
         _filteredUrls: [],
         _filteredUrlsLastSelectedIdx: -1,
@@ -752,7 +714,7 @@ export function UrlExplorer() {
         allDomains: [],
         _filteredDomains: [],
         _filteredDomainsLastSelectedIdx: -1,
-        allUrlsMetadata: [],
+        allUrls: new Map(),
         status: "",
         urlFilter: {
             urlContains: "",
@@ -806,12 +768,12 @@ export function UrlExplorer() {
                     return;
                 }
 
-                const url = getFirstOrNone(state.selectedUrls);
-                if (url) {
+                const urlInfo = getCurrentUrlInfo(state);
+                if (urlInfo) {
                     if (s.args.openInNewTab) {
-                        navigateToUrl(url, true, false);
+                        navigateToUrl(urlInfo.url, true, false);
                     } else {
-                        navigateToUrl(url, false, false);
+                        navigateToUrl(urlInfo.url, false, false);
                     }
                     return;
                 }
@@ -856,10 +818,14 @@ export function UrlExplorer() {
 
     async function refetchData(options: UrlExplorerStateRefetchOptions) {
         try {
+            let t0 = Date.now();
+            let domainsFetched = 0;
+            let urlsFetched = 0;
+
             if (options.refetchDomains) {
                 state.status = "loading domains...";
                 renderUrlExplorer();
-                let allDomains = await runReadTx("allDomains");
+                let allDomains = await runReadTx("allDomains", kvCache);
 
                 allDomains = allDomains || [];
                 const countTx: Record<string, string> = {};
@@ -869,7 +835,7 @@ export function UrlExplorer() {
 
                 state.status = "loading domain counts...";
                 renderUrlExplorer();
-                const countData = await runReadTx(countTx);
+                const countData = await runReadTx(countTx, kvCache);
 
                 state.allDomains = [];
                 for (const domainUrl of allDomains) {
@@ -878,6 +844,8 @@ export function UrlExplorer() {
                         count: countData[domainUrl],
                     });
                 }
+
+                domainsFetched = state.allDomains.length;
             }
 
             if (options.refetchUrls) {
@@ -903,7 +871,7 @@ export function UrlExplorer() {
                     const readTx: Record<string, any> = {};
                     for (const domain of state.selectedDomains) {
                         readTx["allUrls:" + domain] = "allUrls:" + domain;
-                        readTx["allUrlsCount:" + domain] = "allUrls:" + domain;
+                        readTx["allUrlsCount:" + domain] = "allUrlsCount:" + domain;
                     }
                     if (tabId !== undefined) {
                         readTx["currentVisibleUrlsRead"] = "currentVisibleUrls:" + tabId;
@@ -911,7 +879,7 @@ export function UrlExplorer() {
                         readTx[SKIP_READ_KEY + "currentVisibleUrls"] = -1;
                     }
 
-                    const data = await runReadTx(readTx);
+                    const data = await runReadTx(readTx, kvCache);
 
                     // process the data
 
@@ -923,8 +891,6 @@ export function UrlExplorer() {
                         }
                     }
 
-                    // TODO: fix to only be the recently visited ones instead of all of them...
-                    state.recentlyVisitedUrls = allUrls || [];
                     state.currentlyVisibleUrls = currentVisibleUrlsRead || [];
                 }
 
@@ -932,7 +898,7 @@ export function UrlExplorer() {
                 {
                     const readTx2: Record<string, any> = {};
                     for (const url of allUrls) {
-                        readTx2[url] = getSchemaInstanceFields(URL_SCHEMA, url, [
+                        readTx2[url] = getSchemaInstanceFields(urlSchema, url, [
                             "linkText",
                             "isAsset"
                         ]);
@@ -940,11 +906,17 @@ export function UrlExplorer() {
 
                     state.status = "fetching url metadata..."
                     renderUrlExplorer();
-                    const data = await runReadTx(readTx2);
+                    const data = await runReadTx(readTx2, kvCache);
 
                     state.status = "done"
-                    state.recentlyVisitedUrls = pluck(data, "allUrls") ?? [];
-                    state.allUrlsMetadata = Object.values(data);
+
+                    state.allUrls.clear();
+                    for (const id of allUrls) {
+                        const urlInfo = data[id];
+                        state.allUrls.set(id, urlInfo);
+                    }
+
+                    urlsFetched = state.allUrls.size;
 
                     renderUrlExplorer();
                 }
@@ -966,7 +938,7 @@ export function UrlExplorer() {
                 }
             }
 
-            state.status = "ready";
+            state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms";
             renderUrlExplorer();
         } catch (e) {
             state.status = "An error occured: " + e;
@@ -999,13 +971,49 @@ export function UrlExplorer() {
             // TODO: check if this is hella slow or nah
 
             clear(state._filteredUrls);
-            filterUrls(state.allUrlsMetadata, state._filteredUrls, state.currentlyVisibleUrls, state.urlFilter);
+            function pushSubset(recent: boolean) {
+                for (const urlInfo of state.allUrls.values()) {
+                    const isRecent = state.currentlyVisibleUrls.includes(urlInfo.url);
+
+                    if (recent !== isRecent) {
+                        continue;
+                    }
+
+                    if (!state.urlFilter.showAssets && urlInfo.isAsset) {
+                        continue;
+                    }
+
+                    if (!state.urlFilter.showPages && !urlInfo.isAsset) {
+                        continue;
+                    }
+
+                    // This expensive check goes last
+                    const urlContains = state.urlFilter.urlContains;
+                    if (urlContains && (
+                        !urlInfoContains(urlInfo, urlContains)
+                    )) {
+                        // fallback to splitting the query string and anding all the results
+                        if (!urlContains.split(" ").every(queryPart => {
+                            return urlInfoContains(urlInfo, queryPart.trim());
+                        })) {
+                            continue;
+                        }
+                    }
+
+                    state._filteredUrls.push(urlInfo);
+                }
+            }
+
+            // put all the currently visible urls above the other ones.
+            pushSubset(true);
+            pushSubset(false);
         }
 
         rg.render();
     }
 
     function renderAsync() {
+        kvCache.clear();
         refetchData({ refetchDomains: true, refetchUrls: true });
     }
 

@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
-import { clearAllData, collectUrlsFromTabs, recieveMessage, saveOutgoingLinks } from "./state";
+import { clearAllData, collectUrlsFromTabs, recieveMessage, saveNewUrls } from "./state";
 import { runAllTests } from "./tests";
 
 browser.runtime.onInstalled.addListener(() => {
@@ -118,7 +118,7 @@ recieveMessage((message, sender) => {
         if (tabId) {
             message.tabId = { tabId };
         }
-        saveOutgoingLinks(message);
+        saveNewUrls(message);
         return;
     }
 });

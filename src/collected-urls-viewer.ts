@@ -1,5 +1,5 @@
 import { isTypeKey } from "./default-storage-area";
-import { URL_SCHEMA, UrlInfo } from "./state";
+import { urlSchema, UrlInfo } from "./state";
 import { div, newComponent, newListRenderer, newRenderGroup, newState } from "./utils/dom-utils";
 
 function UrlItem() {
@@ -26,7 +26,7 @@ export function CollectedUrlsViewer() {
             }
 
             for (const k in data) {
-                if (!isTypeKey(k, URL_SCHEMA)) {
+                if (!isTypeKey(k, urlSchema)) {
                     continue;
                 }
 

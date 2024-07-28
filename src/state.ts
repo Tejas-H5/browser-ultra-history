@@ -1,6 +1,6 @@
 import { setCssVars } from "src/utils/dom-utils";
 import browser, { browserAction } from "webextension-polyfill";
-import { WriteTx, clearKeys, filterObject, getAllData, getSchemaInstanceFields, hasNewItems, mergeArrays, newSchema, removeKey, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmpty } from "./default-storage-area";
+import { WriteTx, clearKeys, filterObject, getAllData, getSchemaInstanceFields, hasNewItems, mergeArrays, newSchema, removeKey, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmptyInstance } from "./default-storage-area";
 import { logTrace } from "./utils/log";
 import { newTimer } from "./utils/perf";
 
@@ -244,7 +244,7 @@ const urlFields = [
     "parentType",
 ] as const;
 
-export const URL_SCHEMA = newSchema({
+export const urlSchema = newSchema({
     type: "url",
     idField: "url", 
     fields: [...urlFields],
@@ -257,7 +257,7 @@ function isArrayOrUndefined(val: any): val is unknown[] | undefined {
 // if previousUrlInfo is supplied, we'll try to save a delta, which should be faster
 export function saveUrlInfo(tx: WriteTx, urlInfo: UrlInfo, previousUrlInfo: UrlInfo | undefined) {
     if (!previousUrlInfo) {
-        setInstanceFieldKeys(tx, URL_SCHEMA, urlInfo);
+        setInstanceFieldKeys(tx, urlSchema, urlInfo);
         return;
     }
 
@@ -265,6 +265,7 @@ export function saveUrlInfo(tx: WriteTx, urlInfo: UrlInfo, previousUrlInfo: UrlI
         const existingValue = previousUrlInfo[key];
 
         if (key === "url") {
+            // Could be either existingValue or newValue, makes no difference
             return newValue;
         }
 
@@ -287,7 +288,7 @@ export function saveUrlInfo(tx: WriteTx, urlInfo: UrlInfo, previousUrlInfo: UrlI
         return newValue;
     });
 
-    setInstanceFieldKeys(tx, URL_SCHEMA, filteredUrlInfo);
+    setInstanceFieldKeys(tx, urlSchema, filteredUrlInfo);
 
     return;
 }
@@ -343,13 +344,12 @@ export function getUrlDomain(url: string) {
     return new URL(url).hostname;
 }
 
-export async function saveOutgoingLinks(args : SaveUrlsMessage) {
+export async function saveNewUrls(args : SaveUrlsMessage) {
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {
         sendMessage(args);
         return;
     }
-
 
     const timer = newTimer();
     timer.logTime("Started");
@@ -360,14 +360,12 @@ export async function saveOutgoingLinks(args : SaveUrlsMessage) {
         tabId,
     } = args;
 
-
     const domainMap = separateByDomain(urls);
     const currentDomain = getUrlDomain(currentTablUrl);
     if (!(currentDomain in domainMap)) {
         domainMap[currentDomain] = [];
     }
 
-    console.log("Saving urls", urls, domainMap);
 
 
     // Read in the stuff
@@ -376,8 +374,8 @@ export async function saveOutgoingLinks(args : SaveUrlsMessage) {
         timer.logTime("Preparing read tx")
 
         const readTx: Record<string, any> = {};
-        for (const link of urls) {
-            readTx[link.url] = getSchemaInstanceFields(URL_SCHEMA, link.url);
+        for (const info of urls) {
+            readTx[info.url] = getSchemaInstanceFields(urlSchema, info.url);
         }
         for (const domain in domainMap) {
             readTx["allUrls:" + domain] = "allUrls:" + domain;
@@ -388,28 +386,27 @@ export async function saveOutgoingLinks(args : SaveUrlsMessage) {
         data = await runReadTx(readTx);
     }
 
-
-    // Write back the new stuff. I stg it's faster to read the existing data and write the diff.
+    // Write back the new stuff
     let numNewUrls = 0;
     {
         timer.logTime("Preparing write tx")
 
         const writeTx: WriteTx = {};
 
-        for (const link of urls) {
-            const previousUrlInfo = data[link.url];
-            if (undefinedOrEmpty(previousUrlInfo, URL_SCHEMA)) {
+        for (const info of urls) {
+            const previousUrlInfo = data[info.url];
+            if (undefinedOrEmptyInstance(previousUrlInfo, urlSchema)) {
                 numNewUrls += 1;
             }
 
-            saveUrlInfo(writeTx, link, previousUrlInfo);
+            saveUrlInfo(writeTx, info, previousUrlInfo);
         }
 
         for (const domain in domainMap) {
-            const oldUrls = data["allUrls:" + domain];
-            const incomingUrls = domainMap[domain].map(i => i.url);
-            if (hasNewItems(oldUrls, incomingUrls)) {
-                const merged = mergeArrays(oldUrls, incomingUrls);
+            const oldUrlIds = data["allUrls:" + domain];
+            const incomingUrlIds = domainMap[domain].map(i => i.url);
+            if (hasNewItems(oldUrlIds, incomingUrlIds)) {
+                const merged = mergeArrays(oldUrlIds, incomingUrlIds);
                 writeTx["allUrls:" + domain] = merged;
                 writeTx["allUrlsCount:" + domain] = merged!.length;
             }
