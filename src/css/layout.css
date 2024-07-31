@@ -4,6 +4,7 @@
 
 .row { display: flex; flex-direction: row; }
 .col { display: flex; flex-direction: column; }
+.flex-wrap { display: flex; flex-wrap: wrap; }
 
 .flex-1 {
     flex: 1;
@@ -52,6 +53,7 @@
 .text-align-left { text-align: left; }
 .pre-wrap { white-space: pre-wrap; }
 .nowrap { text-wrap: nowrap; }
+.wrap { text-wrap: nowrap; }
 .pre { white-space: pre; }
 .b { font-weight: bold; }
 .i { font-style: italic; }

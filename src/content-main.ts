@@ -1,6 +1,6 @@
 import { forEachMatch, } from "src/utils/re";
 import { onStateChange } from "./default-storage-area";
-import { EnabledFlags, UrlInfo, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
+import { EnabledFlags, UrlInfo, UrlType, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
 import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
 
 declare global {
@@ -12,7 +12,6 @@ declare global {
 const MAX_STRING_SIZE = 100;
 
 let saving = false;
-let currentTabId = 0;
 let noneFound = false;
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
@@ -255,6 +254,51 @@ type LinkQueryResult = {
     domNode?: HTMLElement;
 }
 
+// NOTE: this thing works well for links that are actually associated with a thumbnail image:
+// ```
+// <div class="tile-item">
+//      <div class="thumbnail"> ... <img/> </div>
+//      <div class="info"> ... <a/> </div>
+// </div>
+// ```
+// However, it won't work for regular links:
+// ```
+// <div class="article-page">
+//      <div class="image-carousel" />  <--- We dont want to collect this shite, but we DEF want to collect the one above, so my compromise
+//                                           is to limit this collection to just 1 link at a time.
+//      <div class="section" />
+//      <div class="section" />
+//      <div class="section" />
+//      <div class="seciton" > ... <a/> </div>
+// </div>
+// ```
+function findImagesFor(el: Element): string[] | undefined {
+    const MAX_LEVELS = 10;
+    let currentEl = el;
+    for (let i = 0; i < MAX_LEVELS; i++) {
+        for (const img of currentEl.querySelectorAll("img")) {
+            const src = img.getAttribute("src");
+            if (!src) {
+                continue;
+            }
+
+            try {
+                const protocol = new URL(src).protocol;
+                // The trent micro green check bruh
+                if (protocolIsExtension(protocol)) {
+                    continue;
+                }
+            } catch(e) {
+                continue;
+            }
+
+            return [src];
+        }
+    }
+
+    return undefined;
+}
+
 function getLinks(): LinkQueryResult[] | undefined {
     if (!enabledFlags || !enabledFlags.extension) {
         sendLog("Warning: ran `getLinks` without any enabled flags - indicates a bug in our code");
@@ -320,7 +364,7 @@ function getLinks(): LinkQueryResult[] | undefined {
 
     sendLog("started collection");
 
-    function pushAllOfAttr(tag: string, attr: string, isAsset: true | undefined = undefined) {
+    function pushAllOfAttr(tag: string, attr: string, type: UrlType = "url") {
         for (const el of document.getElementsByTagName(tag)) {
             const url = el.getAttribute(attr);
             if (!url) {
@@ -336,11 +380,20 @@ function getLinks(): LinkQueryResult[] | undefined {
                 }
             }
 
-            pushUrl({ 
-                url: url, 
-                attrName: [attr], 
-                linkText: linkText ? [linkText] : undefined, 
-                isAsset,
+            let linkImageUrl: string[] | undefined;
+            if (type === "image") {
+                linkImageUrl = [url];
+            } else if (type === "url") {
+                // attempt to do some tree poking to find the image associated with this link
+                linkImageUrl = findImagesFor(el);
+            }
+
+            pushUrl({
+                url: url,
+                linkImageUrl,
+                type,
+                attrName: [attr],
+                linkText: linkText ? [linkText] : undefined,
             }, el as HTMLElement);
         }
     }
@@ -349,10 +402,10 @@ function getLinks(): LinkQueryResult[] | undefined {
     if (enabledFlags.deepCollect) {
         // TODO: something idk
     }
-    pushAllOfAttr("link", "href", true);
-    pushAllOfAttr("img", "src", true);
-    pushAllOfAttr("video", "src", true);
-    pushAllOfAttr("source", "src", true);
+    pushAllOfAttr("link", "href");
+    pushAllOfAttr("img", "src", "image");
+    pushAllOfAttr("video", "src", "video");
+    pushAllOfAttr("source", "src", "video");
 
     sendLog("collected from attributes");
 
@@ -367,7 +420,7 @@ function getLinks(): LinkQueryResult[] | undefined {
 
                 forEachMatch(val, cssUrlRegex(), (matches) => {
                     const url = matches[1];
-                    pushUrl({ url: url, styleName: [styleName], isAsset: true, }, el);
+                    pushUrl({ url: url, styleName: [styleName], type: "url" }, el);
                 });
             }
         }
@@ -384,7 +437,7 @@ function getLinks(): LinkQueryResult[] | undefined {
                 const url = matches[1];
 
                 const styleName = getStyleName(val, start);
-                pushUrl({  url: url, styleName: [styleName], isAsset: true }, el);
+                pushUrl({  url: url, styleName: [styleName], type: "url" }, el);
             });
         }
 
@@ -433,9 +486,9 @@ function getLinks(): LinkQueryResult[] | undefined {
 
             pushUrl({ 
                 url: url, 
-                contextString: [contextString], 
+                linkText: [contextString], 
                 parentType: !parentElType ? undefined : [parentElType] ,
-                isAsset,
+                type: "url"
             }, parentEl); 
         });
     }

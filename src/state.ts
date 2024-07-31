@@ -217,30 +217,33 @@ export function newUrlInfo(info: Omit<UrlInfo, "visitedAt">): UrlInfo {
     return { ...info, };
 }
 
+export type UrlType = "url" | "image" | "audio" | "video";
+
 // TODO: store visitedAt in a separate time-series list, i.e 'history'
 export type UrlInfo = {
     url: string;
+    type: UrlType;
 
     // did we find this in a stylesheet?
-    isAsset?: boolean;
     isRedirect?: boolean;
 
+    // implemented:
     urlFrom?: string[];
     styleName?: string[];
     attrName?: string[];
     linkText?: string[];
-    linkImage?: string[];
-    contextString?: string[];
     parentType?: string[];
-}
+
+    // TODO: implement
+    linkImageUrl?: string[];
+};
 
 const urlFields = [
-    "isAsset",
+    "type",
     "styleName",
     "attrName",
     "linkText",
-    "linkImage",
-    "contextString",
+    "linkImageUrl",
     "parentType",
 ] as const;
 

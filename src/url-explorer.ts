@@ -3,7 +3,7 @@ import { navigateToUrl } from "./open-pages";
 import { SmallButton } from "./small-button";
 import { UrlInfo, getCurrentTab, getUrlDomain, urlSchema } from "./state";
 import { clear, filterInPlace } from "./utils/array-utils";
-import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, setVisible, span } from "./utils/dom-utils";
+import { __experimental__inlineComponent, div, divClass, el, newComponent, newListRenderer, newRenderGroup, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, setStyle, setVisible, span } from "./utils/dom-utils";
 
 type UrlListFilter = {
     urlContains: string;
@@ -19,45 +19,18 @@ const cnLinkItem = sg.makeClass("linkItem", [
     `.alreadyInPath { color: #00F }`,
     `.recentlyVisited { background-color: #AFC2FF; }`,
     `.selected { background-color: var(--bg-color-focus); }`,
+    // Thanks bro: https://stackoverflow.com/questions/35361986/css-gradient-checkerboard-pattern
+    ` .checkerboard {
+          background-image: linear-gradient(45deg, #808080 25%, transparent 25%), linear-gradient(-45deg, #808080 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #808080 75%), linear-gradient(-45deg, transparent 75%, #808080 75%);
+          background-size: 20px 20px;
+          background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }`
 ]);
 
 // shift+select tends to highlight things in the browser by default.
 // This will unselect the highlight
 function deselectRanges() {
     document.getSelection()?.removeAllRanges();
-}
-
-export function LinkItem() {
-    const s = newState<{
-        urlInfo: UrlInfo;
-        urlText: string;
-        onClick(info: UrlInfo, type: SelectionType): void;
-        isSelected : boolean;
-
-        index?: number;
-        isVisibleOnCurrentPage?: boolean;
-    }>();
-
-    const rg = newRenderGroup();
-    const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
-        rg.text(() => s.args.isVisibleOnCurrentPage ? "[Visible] " : ""),
-        rg.text(() => s.args.urlText),
-        rg.text(() => " (" + s.args.urlInfo.url + ")"),
-    ]);
-
-    function render() {
-        rg.render();
-
-        setClass(root, "selected", s.args.isSelected);
-    }
-
-    on(root, "click", (e) => {
-        const { onClick, urlInfo: linkInfo } = s.args;
-
-        onClick(linkInfo, getSelectionType(e));
-    });
-
-    return newComponent(root, render, s);
 }
 
 function contains(thing: string | string[] | undefined, queryStr: string): boolean {
@@ -79,9 +52,8 @@ function urlInfoContains(urlInfo: UrlInfo, queryStr: string):  boolean {
     return contains(urlInfo.url, queryStr) ||
         contains(urlInfo.styleName, queryStr) ||
         contains(urlInfo.attrName, queryStr) ||
-        contains(urlInfo.contextString, queryStr) ||
         contains(urlInfo.linkText, queryStr) ||
-        contains(urlInfo.linkImage, queryStr);
+        contains(urlInfo.linkImageUrl, queryStr);
 }
 
 function getFirstOrNone<T>(set: Set<T>): T | undefined {
@@ -96,35 +68,119 @@ function getFirstOrNone<T>(set: Set<T>): T | undefined {
     return undefined;
 }
 
-function UrlList()  {
+function UrlList() {
     const s = newState<{
         state: UrlExplorerState;
-        title: string;
     }>();
 
-    // TODO: literally use scroll container
-    const scrollContainer = div({ 
-        class: "nowrap overflow-y-auto", 
+    function ListItem() {
+        const s = newState<{
+            urlInfo: UrlInfo;
+            state: UrlExplorerState;
+            urlText: string;
+            onClick(info: UrlInfo, type: SelectionType): void;
+            isSelected: boolean;
+            isTile: boolean;
+
+            isVisibleOnCurrentPage?: boolean;
+        }>();
+
+        const rg = newRenderGroup();
+        const img = el<HTMLImageElement>("img");
+        const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
+            setAttrs(img, { class: "w-100 checkerboard", loading: "lazy" }),
+            div({ class: "handle-long-words" }, [
+                rg.text(() => s.args.isVisibleOnCurrentPage ? "[Visible] " : ""),
+                span({ class: "b" }, [
+                    rg.text(() => s.args.urlText),
+                ]),
+                rg.text(() => " (" + s.args.urlInfo.url + ")"),
+            ])
+        ]);
+
+        function render() {
+            rg.render();
+
+            setClass(root, "selected", s.args.isSelected);
+            if (s.args.isTile) {
+                setStyle(root, "width", "25%");
+                setStyle(root, "textWrap", "wrap");
+                setStyle(root, "display", "inline-block");
+            } else {
+                setStyle(root, "width", "");
+                setStyle(root, "textWrap", "");
+                setStyle(root, "display", "block");
+            }
+
+            const state = s.args.state;
+            const urlInfo = s.args.urlInfo;
+
+            if (setVisible(
+                img,
+                state.showImages
+                && urlInfo.linkImageUrl && urlInfo.linkImageUrl.length > 0
+            )) {
+                setAttr(img, "src", urlInfo.linkImageUrl![urlInfo.linkImageUrl!.length - 1]);
+            } else {
+                setAttr(img, "src", "");
+            }
+        }
+
+        on(root, "click", (e) => {
+            const { onClick, urlInfo: linkInfo } = s.args;
+            onClick(linkInfo, getSelectionType(e));
+        });
+
+        return newComponent(root, render, s);
+    }
+
+    function onItemClick(urlInfo: UrlInfo, type: SelectionType) {
+        const { state } = s.args;
+        const index = state._filteredUrls.findIndex(info => info === urlInfo);
+        if (index === -1) {
+            return;
+        }
+
+        const lastIdx = state._filteredUrlsLastSelectedIdx;
+        state._filteredUrlsLastSelectedIdx = index;
+
+        updateSelection(
+            urlInfo.url,
+            index,
+            state.selectedUrls,
+            (i) => state._filteredUrls[i].url,
+            state._filteredUrls.length,
+            lastIdx,
+            type
+        );
+
+        state.renderUrlExplorer();
+    }
+
+    const listViewRoot = div({
+        class: "nowrap overflow-y-auto",
         // Need padding for the scrollbar
-        style: "padding-bottom: 10px" 
+        style: "padding-bottom: 10px",
     });
+
+    const mediaViewRoot = div({
+        class: "overflow-y-auto",
+        // Need padding for the scrollbar
+        style: "padding-bottom: 10px",
+    });
+
     const rg = newRenderGroup();
-    const root = divClass("flex-1 overflow-x-auto col", {}, [
-        div({ class: "row justify-content-center", style: "padding: 0 10px;" }, [
-            div({ class: "b" }, [rg.text(() => {
-                const { state } = s.args;
-                const total = state.allUrls.size;
-                const filtered = state._filteredUrls.length;
+    const root = divClass("flex-1 overflow-x-auto", {}, [
+        rg(newListRenderer(listViewRoot, ListItem), c => c.render((getNext) => {
+            const { currentlyVisibleUrls, selectedUrls, _filteredUrls, urlFilter } = s.args.state;
 
-                if (total !== filtered) {
-                    return s.args.title + ": " + filtered + " / " + total;
-                }
+            // const isTileView = urlFilter.showAssets;
+            // Turns out that this view is better for viewing a large number of links as well. lol.
+            const isTileView = true;
 
-                return s.args.title + ": " + total;
-            })]),
-        ]),
-        rg(newListRenderer(scrollContainer, LinkItem), c => c.render((getNext) => {
-            const { currentlyVisibleUrls, selectedUrls, _filteredUrls } = s.args.state;
+            setClass(listViewRoot, "col", !isTileView);
+            setClass(listViewRoot, "row", isTileView);
+            setClass(listViewRoot, "flex-wrap", isTileView);
 
             for (const urlInfo of _filteredUrls) {
                 const linkUrl = urlInfo.url;
@@ -136,32 +192,11 @@ function UrlList()  {
 
                     urlInfo: urlInfo,
                     urlText: urlInfo.linkText?.join(", ") ?? "",
-                    onClick(urlInfo, type) {
-                        const { state } = s.args;
-                        const index = state._filteredUrls.findIndex(info => info === urlInfo);
-                        if (index === -1) {
-                            return;
-                        }
-
-                        const lastIdx = state._filteredUrlsLastSelectedIdx;
-                        state._filteredUrlsLastSelectedIdx = index;
-
-                        updateSelection(
-                            urlInfo.url,
-                            index,
-                            state.selectedUrls,
-                            (i) => state._filteredUrls[i].url,
-                            state._filteredUrls.length,
-                            lastIdx,
-                            type
-                        );
-
-                        deselectRanges();
-
-                        state.renderUrlExplorer();
-                    },
+                    onClick: onItemClick,
                     isVisibleOnCurrentPage: isVisible,
                     isSelected: selectedUrls.has(urlInfo.url),
+                    isTile: isTileView,
+                    state: s.args.state,
                 });
             }
         })),
@@ -228,20 +263,20 @@ export function LinkInfoDetails() {
                 rg.text(() => s.args.linkInfo.url)
             ]),
         ]),
-        rg( newListRenderer(
+        rg(newListRenderer(
             div(),
-            () => __experimental__inlineComponent<{ 
-                key: string; value: string[] | undefined; alwaysRenderKey?: boolean; 
+            () => __experimental__inlineComponent<{
+                key: string; value: string[] | undefined; alwaysRenderKey?: boolean;
             }>((rg, c) => {
                 const hasValue = () => !!c.args.value && c.args.value.length > 0;
 
-                return div({ class: "row"}, [
+                return div({ class: "row" }, [
                     // always render a key
-                    rg.if(() => c.args.alwaysRenderKey || hasValue(), 
-                        rg => div({ class:"b" }, [ rg.text(() => "" + c.args.key) ])),
+                    rg.if(() => c.args.alwaysRenderKey || hasValue(),
+                        rg => div({ class: "b" }, [rg.text(() => "" + c.args.key)])),
                     // only render this value if we have a value
                     rg.if(hasValue, (rg) => span({}, [
-                        span({ class:"b" }, [ ":" ]),
+                        span({ class: "b" }, [":"]),
                         rg.text(() => ": " + fmt(c.args.value))
                     ])),
                 ])
@@ -260,43 +295,37 @@ export function LinkInfoDetails() {
                 if (s.args.linkInfo.isRedirect) {
                     getNext().render({
                         alwaysRenderKey: true,
-                        key: "This link was created by a redirect.", 
+                        key: "This link was created by a redirect.",
                         value: undefined,
                     });
                 }
 
-                if (s.args.linkInfo.isAsset) {
+                if (s.args.linkInfo.type !== "url") {
                     getNext().render({
                         alwaysRenderKey: true,
-                        key: "This link is an asset.", 
+                        key: "type=" + s.args.linkInfo.type,
                         value: undefined,
                     });
                 }
 
                 getNext().render({
-                    key: "Link Text", 
+                    key: "Link Text",
                     value: s.args.linkInfo.linkText,
                 });
 
-                // TODO: highlight the url or something. 
                 getNext().render({
-                    key: "Surrounding Context", 
-                    value: s.args.linkInfo.contextString,
-                });
-
-                getNext().render({
-                    key: "[debug] Parent element tag name", 
+                    key: "[debug] Parent element tag name",
                     value: s.args.linkInfo.parentType,
                 });
 
 
                 getNext().render({
-                    key: "Attributes", 
+                    key: "Attributes",
                     value: s.args.linkInfo.attrName,
                 });
 
                 getNext().render({
-                    key: "Styles", 
+                    key: "Styles",
                     value: s.args.linkInfo.styleName,
                 });
             })
@@ -372,6 +401,8 @@ function updateSelection<K extends string | number>(
             setSelectedSet(selectedSet, key, !isSelected);
         }
 
+        deselectRanges();
+
         return;
     }
 
@@ -389,11 +420,11 @@ function DomainsScreen() {
             count: number | undefined;
             isChecked: boolean;
             onChange(selectType: "replace" | "range" | "toggle"): void;
-        }>();        
+        }>();
 
         function getCountText(): string {
             const count = s.args.count;
-            if (count ===  undefined) {
+            if (count === undefined) {
                 return "unknown count";
             }
 
@@ -435,10 +466,10 @@ function DomainsScreen() {
     }
 
     // TODO: literally use scroll container
-    const scrollContainer = div({ 
-        class: "nowrap overflow-y-auto", 
+    const scrollContainer = div({
+        class: "nowrap overflow-y-auto",
         // Need padding for the scrollbar
-        style: "padding-bottom: 10px" 
+        style: "padding-bottom: 10px"
     });
     const rg = newRenderGroup();
     const root = div({ class: "p-5 col", style: "max-height: 50%" }, [
@@ -474,7 +505,7 @@ function DomainsScreen() {
         rg(newListRenderer(scrollContainer, DomainItem), c => c.render((getNext) => {
             const { state } = s.args;
 
-            for(let i = 0; i < state._filteredDomains.length; i++) {
+            for (let i = 0; i < state._filteredDomains.length; i++) {
                 const domain = state._filteredDomains[i];
 
                 const isSelected = state.selectedDomains.has(domain.url);
@@ -483,7 +514,7 @@ function DomainsScreen() {
                 c.render({
                     domain: domain.url,
                     count: domain.count,
-                    isChecked: isSelected, 
+                    isChecked: isSelected,
                     onChange(type) {
                         const state = s.args.state;
 
@@ -500,8 +531,6 @@ function DomainsScreen() {
                             lastIdx,
                             type,
                         );
-
-                        deselectRanges();
 
                         s.args.state.refetchData({ refetchUrls: true });
 
@@ -541,7 +570,7 @@ function UrlsScreen() {
         const state = s.args.state;
         const sb = [];
         const sortedUrls = [...state.selectedUrls].sort();
-        for(const url of sortedUrls) {
+        for (const url of sortedUrls) {
             sb.push(url);
             if (sb.length === 10) {
                 sb.push("and " + (sortedUrls.length - 10) + " more...");
@@ -589,6 +618,16 @@ function UrlsScreen() {
                 })),
             ]),
             rg(SmallButton(), c => c.render({
+                text: "Images " + (s.args.state.showImages ? "enabled" : "disabled"),
+                onClick() {
+                    s.args.state.showImages = !s.args.state.showImages;
+                    s.args.state.renderUrlExplorer();
+                },
+                toggled: s.args.state.showImages,
+                noBorderRadius: true,
+            })),
+            span({}, "|"),
+            rg(SmallButton(), c => c.render({
                 text: "Pages",
                 onClick() {
                     s.args.state.urlFilter.showPages = !s.args.state.urlFilter.showPages;
@@ -608,14 +647,6 @@ function UrlsScreen() {
             })),
         ]),
         makeSeparator(),
-        div({ class: "flex-1 col" }, [
-            rg(UrlList(), c => c.render({
-                // TODO: links on this domain
-                title: "All",
-                state: s.args.state,
-            })),
-        ]),
-        makeSeparator(),
         div({ class: "row gap-5 align-items-center", style: "padding: 0 5px;" }, [
             rg.if(() => isCurrentUrlVisible(), rg =>
                 rg(SmallButton(), c => c.render({
@@ -623,6 +654,20 @@ function UrlsScreen() {
                     onClick: onHighlightSelected,
                 }))
             ),
+            div({ class: "flex-1" }),
+            div({ class: "row justify-content-center", style: "padding: 0 10px;" }, [
+                div({ class: "b" }, [rg.text(() => {
+                    const { state } = s.args;
+                    const total = state.allUrls.size;
+                    const filtered = state._filteredUrls.length;
+
+                    if (total !== filtered) {
+                        return filtered + " / " + total;
+                    }
+
+                    return "" + total;
+                })]),
+            ]),
             div({ class: "flex-1" }),
             rg.if(() => s.args.state.selectedUrls.size > 0, rg =>
                 rg(SmallButton(), c => {
@@ -634,7 +679,15 @@ function UrlsScreen() {
                     })
                 })
             )
-        ])
+        ]),
+        makeSeparator(),
+        div({ class: "flex-1 col" }, [
+            rg(UrlList(), c => c.render({
+                // TODO: links on this domain
+                state: s.args.state,
+            })),
+        ]),
+        makeSeparator(),
     ]);
 
     function onHighlightSelected() {
@@ -663,6 +716,7 @@ type UrlExplorerStateRefetchOptions = { refetchUrls?: true; refetchDomains?: tru
 type UrlExplorerState = {
     renderUrlExplorer(): void;
     refetchData(options: UrlExplorerStateRefetchOptions): Promise<void>;
+    showImages: boolean;
     urlFilter: UrlListFilter;
     currentScreen: "url" | "domain";
     currentlyVisibleUrls: string[];
@@ -702,6 +756,7 @@ export function UrlExplorer() {
     const state: UrlExplorerState = {
         renderUrlExplorer,
         refetchData,
+        showImages: false,
         currentScreen: "url",
         currentlyVisibleUrls: [],
         selectedUrls: new Set(),
@@ -899,8 +954,9 @@ export function UrlExplorer() {
                     const readTx2: Record<string, any> = {};
                     for (const url of allUrls) {
                         readTx2[url] = getSchemaInstanceFields(urlSchema, url, [
+                            "linkImageUrl",
                             "linkText",
-                            "isAsset"
+                            "type"
                         ]);
                     }
 
@@ -972,7 +1028,7 @@ export function UrlExplorer() {
             // TODO: check if this is hella slow or nah
 
             clear(state._filteredUrls);
-            function pushSubset(recent: boolean) {
+            function pushSubset(recent: boolean, image: boolean) {
                 for (const urlInfo of state.allUrls.values()) {
                     const isRecent = state.currentlyVisibleUrls.includes(urlInfo.url);
 
@@ -980,11 +1036,16 @@ export function UrlExplorer() {
                         continue;
                     }
 
-                    if (!state.urlFilter.showAssets && urlInfo.isAsset) {
+                    const isAsset = urlInfo.type !== "url";
+                    if (!state.urlFilter.showAssets && isAsset) {
                         continue;
                     }
 
-                    if (!state.urlFilter.showPages && !urlInfo.isAsset) {
+                    if (!state.urlFilter.showPages && !isAsset) {
+                        continue;
+                    }
+
+                    if (image !== (urlInfo.type === "image")) {
                         continue;
                     }
 
@@ -1006,8 +1067,10 @@ export function UrlExplorer() {
             }
 
             // put all the currently visible urls above the other ones.
-            pushSubset(true);
-            pushSubset(false);
+            pushSubset(true, true);
+            pushSubset(false, true);
+            pushSubset(true, false);
+            pushSubset(false, false);
         }
 
         rg.render();
