@@ -1,8 +1,9 @@
 import { setCssVars } from "src/utils/dom-utils";
 import browser, { browserAction } from "webextension-polyfill";
-import { WriteTx, clearKeys, filterObject, getAllData, getSchemaInstanceFields, hasNewItems, mergeArrays, newSchema, removeKey, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmptyInstance } from "./default-storage-area";
+import { WriteTx, clearKeys, filterObject, getAllData, getSchemaInstanceFields, hasNewItems, mergeArrays, newSchema, runReadTx, runWriteTx, setInstanceFieldKeys, undefinedOrEmptyInstance } from "./default-storage-area";
 import { logTrace } from "./utils/log";
 import { newTimer } from "./utils/perf";
+import { groupBy } from "./utils/array-utils";
 
 declare global {
     const process: {
@@ -324,27 +325,22 @@ function compareArrays(arr1: string[] | undefined, arr2: string[] | undefined): 
     return true;
 }
 
-export function separateByDomain(urls: UrlInfo[]): Record<string, UrlInfo[]> {
-    const domainMap: Record<string, UrlInfo[]> = {};
-
-    for (const urlInfo of urls) {
-        const domain = getUrlDomain(urlInfo.url);
-        if (!domain) {
-            // Some urls don't have a valid domain, i.e "android-app://com.google.android.youtube/http/www.youtube.com/"
-            continue;
-        }
-        if (!(domain in domainMap)) {
-            domainMap[domain] = [];
-        }
-        domainMap[domain].push(urlInfo);
-    }
-
-    return domainMap;
+export function groupByUrlDomain(urls: UrlInfo[]): Record<string, UrlInfo[]> {
+    return groupBy(urls, (info) => getUrlDomain(info.url));
 }
 
 export function getUrlDomain(url: string) {
     // TODO: change to hostname, or somethign smarter
     return new URL(url).hostname;
+}
+
+export function getDomainUrlsKey(domain: string): string {
+    return "allUrls:" + domain;
+}
+
+export function writeDomainUrlKeys(writeTx: WriteTx, domain: string, urls: string[]) {
+    writeTx["allUrls:" + domain] = urls.length === 0 ? undefined : urls;
+    writeTx["allUrlsCount:" + domain] = urls.length === 0 ? undefined : urls.length;
 }
 
 export async function saveNewUrls(args : SaveUrlsMessage) {
@@ -363,7 +359,7 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
         tabId,
     } = args;
 
-    const domainMap = separateByDomain(urls);
+    const domainMap = groupByUrlDomain(urls);
     const currentDomain = getUrlDomain(currentTablUrl);
     if (!(currentDomain in domainMap)) {
         domainMap[currentDomain] = [];
@@ -378,9 +374,7 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
         for (const info of urls) {
             readTx[info.url] = getSchemaInstanceFields(urlSchema, info.url);
         }
-        for (const domain in domainMap) {
-            readTx["allUrls:" + domain] = "allUrls:" + domain;
-        }
+        readTx.domainUrls = Object.keys(domainMap).map(getDomainUrlsKey);
         readTx["allDomains"] = "allDomains";
 
         timer.logTime("Running read tx")
@@ -404,12 +398,11 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
         }
 
         for (const domain in domainMap) {
-            const oldUrlIds = data["allUrls:" + domain];
+            const oldUrlIds = data.domainUrls[domain];
             const incomingUrlIds = domainMap[domain].map(i => i.url);
             if (hasNewItems(oldUrlIds, incomingUrlIds)) {
                 const merged = mergeArrays(oldUrlIds, incomingUrlIds);
-                writeTx["allUrls:" + domain] = merged;
-                writeTx["allUrlsCount:" + domain] = merged!.length;
+                writeDomainUrlKeys(writeTx, domain, merged!);
             }
         }
 
@@ -448,6 +441,63 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
     timer.stop();
 }
 
+/**
+ * deletions are a record of { [domain] : url[] }
+ */
+export async function deleteUrls(urlsToDelete: string[]) {
+    // readl all domain lrls
+    const urlsByDomain = groupBy(urlsToDelete, getUrlDomain);
+
+    const readTx: Record<string, any> = {
+        domainUrls: {},
+        allDomains: "allDomains",
+    };
+    for (const domain in urlsByDomain) {
+        readTx.domainUrls[domain] = getDomainUrlsKey(domain);
+    }
+
+    const data = await runReadTx(readTx);
+
+    // filter them, and then write them back
+    const writeTx: WriteTx = {};
+    const domainsToDelete = new Set<string>();
+    for (const domain in urlsByDomain) {
+        const existingUrls = data.domainUrls[domain];
+        const urlsToDelete = urlsByDomain[domain];
+        if (!existingUrls || !urlsToDelete) {
+            continue;
+        }
+
+        const remainingUrls = existingUrls.filter((url: any) => !urlsToDelete.includes(url));
+        writeDomainUrlKeys(writeTx, domain, remainingUrls);
+        if (remainingUrls.length === 0) {
+            domainsToDelete.add(domain);
+        }
+    }
+    if (domainsToDelete.size > 0) {
+        const remainingDomains = (data.allDomains || [])
+            .filter((d: any) => !domainsToDelete.has(d));
+        writeTx["allDomains"] = remainingDomains;
+    }
+
+    await runWriteTx(writeTx);
+}
+
+export async function deleteDomains(domainsToDelete: string[]) {
+    const data = await runReadTx("allDomains");
+
+    const writeTx: WriteTx = {};
+    const toDeleteSet = new Set(domainsToDelete);
+    for (const domain of domainsToDelete) {
+        writeDomainUrlKeys(writeTx, domain, []);
+    }
+    writeTx["allDomains"] = (data || []).filter((d: any) => !toDeleteSet.has(d));
+
+    console.log("Deleted: ", { data, domainsToDelete, writeTx });
+
+    await runWriteTx(writeTx);
+}
+
 type UrlBeforeRedirectData = {
     currentUrl: string;
     timestamp: number;
@@ -459,11 +509,7 @@ export function getTabKey(tabId: TabId): string {
 
 export async function setUrlBeforeRedirect(tabId: TabId, data: UrlBeforeRedirectData | undefined) {
     const key = getTabKey(tabId) + "redirectTempPersistance";
-    if (!data) {
-        await removeKey(key);
-    } else {
-        await runWriteTx({ [key]: data });
-    }
+    await runWriteTx({ [key]: data ?? undefined });
 }
 
 export async function getUrlBeforeRedirect(currentTabId: TabId, currentTimestamp: number) {
@@ -503,7 +549,6 @@ export async function getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
     const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
     return tabs[0];
 }
-
 
 export async function collectUrlsFromActiveTab() {
     return await sendMessageToCurrentTab({ type: "content_collect_urls" });

@@ -1,41 +1,104 @@
 import browser from "webextension-polyfill";
-
 const defaultStorageArea = browser.storage.local;
 
-let debug = false;
+// every interaction with the storage area is now cached, since it's way too slow.
+const kvCache = new Map<string, any>();
 
 export async function getAll() {
-    return await defaultStorageArea.get(null);
+    const data = await defaultStorageArea.get(null);
+
+    // update the cache with the new values.
+    // TODO: a flag indicating that we've loaded all data, so that every read must use the cache.
+    {
+        for (const k of kvCache.keys()) {
+            kvCache.set(k, undefined);
+        }
+
+        for (const k in data) {
+            kvCache.set(k, data[k]);
+        }
+    }
+
+    return data;
 }
 
 export async function clearKeys() {
-    return await defaultStorageArea.clear();
+    await defaultStorageArea.clear();
+    for (const k of kvCache.keys()) {
+        kvCache.set(k, undefined);
+    }
 }
 
-async function getKeys(keys?: null | string | string[] | Record<string, any>) {
-    if (debug) {
-        console.log("read: ", keys);
+async function getKeys(keys?: null | string | string[]) {
+    if (keys === null || keys === undefined) {
+        return await getAll();
     }
-    return await defaultStorageArea.get(keys);
+
+    if (typeof keys === "string") {
+        keys = [keys];
+    }
+        
+    const unreadKeys: string[] = [];
+    const data: Record<string, any> = {};
+    for (const key of keys) {
+        if (kvCache.has(key)) {
+            const val = kvCache.get(key);
+
+            if (val !== undefined) {
+                data[key] = kvCache.get(key);
+            }
+        } else {
+            unreadKeys.push(key);
+        }
+    }
+
+    const dbData = await defaultStorageArea.get(unreadKeys);
+    for (const k of unreadKeys) {
+        const val = dbData[k];
+        kvCache.set(k, val);
+
+        if (val !== undefined) {
+            data[k] = val;
+        }
+    }
+    return data;
 }
 
 async function setKeys(values: Record<string, any>) {
-    if (debug) {
-        console.log("write: ", values);
+    const keysToRemove: string[] = [];
+    for (const k in values) {
+        const val = values[k];
+        if (val === undefined) {
+            keysToRemove.push(k);
+            delete values[k];
+        }
     }
 
-    return await defaultStorageArea.set(values);
+    await defaultStorageArea.set(values);
+    for (const k in values) {
+        kvCache.set(k, values[k]);
+    }
+
+    await defaultStorageArea.remove(keysToRemove);
+    for (const k of keysToRemove) {
+        kvCache.set(k, undefined);
+    }
 }
 
-export async function removeKey(keys: string | string[]) {
-    return await defaultStorageArea.remove(keys);
-}
-
-export function onStateChange(fn: () => void) {
-    defaultStorageArea.onChanged.addListener(() => {
-        fn();
+export function onStateChange(fn: (changes: browser.Storage.StorageAreaOnChangedChangesType) => void) {
+    defaultStorageArea.onChanged.addListener((changes) => {
+        fn(changes);
     });
 }
+
+// we need to update our cache when these values are changed from another context - i.e a popup 
+// deleting stuff from the database should reflect in the tab.
+onStateChange((changes) => {
+    for (const k in changes) {
+        const change = changes[k];
+        kvCache.set(k, change.newValue);
+    }
+});
 
 export async function getAllData() {
     return await getKeys(null);
@@ -136,7 +199,7 @@ export function setInstanceFieldKeys<K extends string[], T extends Record<string
 }
 
 type Mergable = string | number | boolean;
-export function mergeArrays(a: undefined | Mergable[], b: undefined | Mergable[]) {
+export function mergeArrays<T extends Mergable>(a: undefined | T[], b: undefined | T[]) {
     if(!a && !b) {
         return undefined;
     }
@@ -212,24 +275,14 @@ export function undefinedOrEmptyInstance(obj: any, schema: Schema<any>): boolean
  * const [ k1, k2, k3 ] = c;
  * ```
  */
-export async function runReadTx(tx: ReadTx, kvCache?: Map<string, any>): Promise<any> {
+export async function runReadTx(tx: ReadTx): Promise<any> {
     const flatKeys: string[] = [];
     const data = new Map<string, any>();
 
     const dfs = (tx: ReadTx) => {
         if (typeof tx === "string") {
             // use the cache if we can. else, we need to fetch this key from the database
-            if (kvCache?.has(tx)) {
-                data.set(tx, kvCache.get(tx));
-            } else {
-                flatKeys.push(tx);
-
-                if (kvCache) {
-                    // the undefined response also needs to be cached. If it was actually contained in
-                    // the storage area, it should be populated later in this code anyway
-                    kvCache.set(tx, undefined);
-                }
-            }
+            flatKeys.push(tx);
 
             return;
         }
@@ -265,10 +318,6 @@ export async function runReadTx(tx: ReadTx, kvCache?: Map<string, any>): Promise
     for (const k in dataFromDb) {
         const val = dataFromDb[k];
         data.set(k, val);
-
-        if (kvCache) {
-            kvCache.set(k, val);
-        }
     }
 
     const dfs2 = (tx: ReadTx): any => {
@@ -331,6 +380,9 @@ export function pluck(obj: Record<string, any>, key: string) {
  * const writeTx: WriteTransaction = {
  *      ["key1"]: 
  * }
+ *
+ * Actually now we've added a caching layer to cache every value, since default storage is
+ * horribly slow...
  */
 export async function runWriteTx(tx: WriteTx): Promise<void> {
     await setKeys(tx);

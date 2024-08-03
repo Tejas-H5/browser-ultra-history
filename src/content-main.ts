@@ -249,6 +249,27 @@ function cssUrlRegex() {
     return /url\(["'](.*?)["']\)/g;
 }
 
+function getImageUrl(el: Element): string | null {
+    if (el.tagName === "img") {
+        return el.getAttribute("src");
+    }
+
+    let url = getComputedStyle(el).backgroundImage
+        || getComputedStyle(el, ":before").backgroundImage
+        || getComputedStyle(el, ":after").backgroundImage;
+
+    if (!url) {
+        return null;
+    }
+
+    let parsed: string | null = null;
+    forEachMatch(url, cssUrlRegex(), (matches, start) => {
+        parsed = matches[1];
+    });
+
+    return parsed;
+}
+
 type LinkQueryResult = {
     linkInfo: UrlInfo;
     domNode?: HTMLElement;
@@ -276,8 +297,14 @@ function findImagesFor(el: Element): string[] | undefined {
     const MAX_LEVELS = 10;
     let currentEl = el;
     for (let i = 0; i < MAX_LEVELS; i++) {
-        for (const img of currentEl.querySelectorAll("img")) {
-            const src = img.getAttribute("src");
+        for (const anything of currentEl.querySelectorAll("*")) {
+            let src: string | null = null;
+            if (anything.tagName === "IMG") {
+                src = anything.getAttribute("src");
+            } else {
+                src = getImageUrl(anything);
+            }
+
             if (!src) {
                 continue;
             }

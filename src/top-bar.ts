@@ -4,6 +4,7 @@ import { renderContext } from './render-context';
 import { SmallButton } from './small-button';
 import { EnabledFlags, clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getEnabledFlags, getStateJSON, loadStateJSON, setEnabledFlags } from './state';
 import { loadFile, saveText } from './utils/file-download';
+import { commands } from 'webextension-polyfill';
 
 
 export function TopBar(isMain: boolean) {
@@ -41,21 +42,23 @@ export function TopBar(isMain: boolean) {
         ),
         isMain && (
             rg(SmallButton(), c => c.render({
-                text: "Collect from all tab",
+                text: "Collect from all tabs",
                 onClick: async () => {
                     await collectUrlsFromTabs();
                 }
             }))
         ),
-        !isMain && (
-            rg(SmallButton(), c => c.render({
-                text: "Clear",
-                onClick: async () => {
-                    await clearAllData();
-                    await refetchState();
+        rg(SmallButton(), c => c.render({
+            text: "Clear all data",
+            onClick: async () => {
+                if (!confirm("Are you sure you want to clear ALL your data?!?!")) {
+                    return;
                 }
-            }))
-        ),
+
+                await clearAllData();
+                await refetchState();
+            }
+        })),
 
         div({ class: "flex-1" }),
 

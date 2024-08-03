@@ -109,3 +109,19 @@ export function findInSortedArray<T, K>(arr: T[], val: K, key: (a: T) => K, comp
 
     return arr[idx];
 }
+
+export function groupBy<T>(arr: T[], keyFn: (val: T) => string) {
+    const map: Record<string, T[]> = {};
+    for (const val of arr) {
+        const k = keyFn(val);
+        if (!k) {
+            continue;
+        }
+
+        if (!(k in map)) {
+            map[k] = [];
+        }
+        map[k].push(val);
+    }
+    return map;
+}
