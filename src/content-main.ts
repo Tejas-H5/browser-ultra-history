@@ -58,7 +58,7 @@ function uninit() {
 }
 
 
-recieveMessage((message, _sender) => {
+recieveMessage(async (message, _sender) => {
     if (!isEnabled()) {
         return;
     }
@@ -91,15 +91,18 @@ recieveMessage((message, _sender) => {
 
 }, "content");
 
-
-// Collect URLs whenever we scroll the page
-document.addEventListener("scroll", () => {
+function onScroll() {
     if (!isEnabled()) {
         return;
     }
 
     collectUrlsDebounced();
-});
+}
+
+// Collect URLs whenever we scroll the page.
+// Some pages will bind the scroll wheel to something, so we improvise
+document.addEventListener("scroll", onScroll);
+document.addEventListener("wheel", onScroll);
 
 onStateChange(async () => {
     const enabledFlags = await getEnabledFlags();

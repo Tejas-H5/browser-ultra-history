@@ -98,7 +98,7 @@ async function onStart() {
     }
 }
 
-recieveMessage((message, sender) => {
+recieveMessage(async (message, sender) => {
     if (message.type === "log") {
         console.log(message.tabUrl, ":", message.message);
         return;
@@ -106,10 +106,11 @@ recieveMessage((message, sender) => {
 
     console.log("got message: ", message.type);
 
-    if (message.type === "start_collection_from_tabs") {
-        if (message.tabIds) {
-            collectUrlsFromTabs();
-        }
+    if (
+        message.type === "start_collection_from_tabs"
+        && message.tabIds
+    ) {
+        await collectUrlsFromTabs();
         return;
     }
 
@@ -118,7 +119,7 @@ recieveMessage((message, sender) => {
         if (tabId) {
             message.tabId = { tabId };
         }
-        saveNewUrls(message);
+        await saveNewUrls(message);
         return;
     }
 });

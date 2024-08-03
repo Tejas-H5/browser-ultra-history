@@ -47,7 +47,7 @@ function contains(thing: string | string[] | undefined, queryStr: string): boole
     return strLower.includes(queryStr.toLowerCase());
 }
 
-function urlInfoContains(urlInfo: UrlInfo, queryStr: string):  boolean {
+function urlInfoContains(urlInfo: UrlInfo, queryStr: string): boolean {
     // this one is more important than the others
     return contains(urlInfo.url, queryStr) ||
         contains(urlInfo.styleName, queryStr) ||
@@ -243,9 +243,9 @@ export function TextInput() {
 
 
 // TODO: needs to render multiple urls
-export function LinkInfoDetails() {
+export function UrlInfoDetails() {
     const s = newState<{
-        linkInfo: UrlInfo;
+        urlInfo: UrlInfo;
     }>();
 
     function fmt(str: string[] | undefined) {
@@ -257,80 +257,14 @@ export function LinkInfoDetails() {
     }
 
     const rg = newRenderGroup();
-    const root = div({}, [
-        div({ class: "row handle-long-words" }, [
-            div({}, [
-                rg.text(() => s.args.linkInfo.url)
-            ]),
+    const root = div({ class: "row handle-long-words" }, [
+        span({ class: "b" }, [
+            rg.text(() => fmt(s.args.urlInfo.linkText)),
+            " ",
+            rg.text(() => "(" + s.args.urlInfo.url + ")" )
         ]),
-        rg(newListRenderer(
-            div(),
-            () => __experimental__inlineComponent<{
-                key: string; value: string[] | undefined; alwaysRenderKey?: boolean;
-            }>((rg, c) => {
-                const hasValue = () => !!c.args.value && c.args.value.length > 0;
-
-                return div({ class: "row" }, [
-                    // always render a key
-                    rg.if(() => c.args.alwaysRenderKey || hasValue(),
-                        rg => div({ class: "b" }, [rg.text(() => "" + c.args.key)])),
-                    // only render this value if we have a value
-                    rg.if(hasValue, (rg) => span({}, [
-                        span({ class: "b" }, [":"]),
-                        rg.text(() => ": " + fmt(c.args.value))
-                    ])),
-                ])
-            })),
-            c => c.render((getNext) => {
-                // TODO:
-                // rg.if(() => !!c.args.index, rg => rg.text(() => "" + c.args.index!)),
-                // rg.text(() => fmt("Image", c.args.linkInfo?.linkImage)),
-                //
-                // [x] rg.text(() => fmt("Link text", c.args.linkInfo?.linkText)),
-                // [~x] rg.text(() => fmt("Context", c.args.linkInfo?.contextString)),
-                // [x] rg.text(() => fmt("Redirect", c.args.linkInfo?.redirect && ["redirect"])),
-                // [x] rg.text(() => fmt("Attribute", c.args.linkInfo?.attrName)),
-                // [x]rg.text(() => fmt("Style", c.args.linkInfo?.styleName)),
-
-                if (s.args.linkInfo.isRedirect) {
-                    getNext().render({
-                        alwaysRenderKey: true,
-                        key: "This link was created by a redirect.",
-                        value: undefined,
-                    });
-                }
-
-                if (s.args.linkInfo.type !== "url") {
-                    getNext().render({
-                        alwaysRenderKey: true,
-                        key: "type=" + s.args.linkInfo.type,
-                        value: undefined,
-                    });
-                }
-
-                getNext().render({
-                    key: "Link Text",
-                    value: s.args.linkInfo.linkText,
-                });
-
-                getNext().render({
-                    key: "[debug] Parent element tag name",
-                    value: s.args.linkInfo.parentType,
-                });
-
-
-                getNext().render({
-                    key: "Attributes",
-                    value: s.args.linkInfo.attrName,
-                });
-
-                getNext().render({
-                    key: "Styles",
-                    value: s.args.linkInfo.styleName,
-                });
-            })
-        )
-    ]);
+        rg.text(() => " Collected from " + fmt(s.args.urlInfo.urlFrom)),
+    ])
 
     return newComponent(root, rg.render, s);
 }
@@ -571,10 +505,10 @@ function UrlsScreen() {
     const root = div({ class: "flex-1 p-5 col" }, [
         makeSeparator(),
         div({ class: "row justify-content-center" }, [
-            rg.if(() => !!getCurrentUrlInfo(s.args.state), rg => rg(LinkInfoDetails(), (c) => {
+            rg.if(() => !!getCurrentUrlInfo(s.args.state), rg => rg(UrlInfoDetails(), (c) => {
                 const currentUrlInfo = getCurrentUrlInfo(s.args.state);
-                if (currentUrlInfo)  {
-                    c.render({ linkInfo: currentUrlInfo  });
+                if (currentUrlInfo) {
+                    c.render({ urlInfo: currentUrlInfo });
                 }
             })),
         ]),
@@ -824,7 +758,7 @@ export function UrlExplorer() {
                     }
                 });
             }),
-            rg.if(() => state.currentScreen === "domain", rg => 
+            rg.if(() => state.currentScreen === "domain", rg =>
                 div({ class: "pointer b row p-5", style: "gap: 10px;" }, [
                     rg(setAttrs(SmallButton(), { class: " nowrap" }, true), c => {
                         c.render({
@@ -938,7 +872,7 @@ export function UrlExplorer() {
                 renderUrlExplorer();
                 const countData = await runReadTx(countTx);
 
-                
+
                 const lastSelected = state.selectedDomains;
                 state.allDomains = [];
                 state.selectedDomains = new Set();
@@ -1014,6 +948,7 @@ export function UrlExplorer() {
                         readTx2[url] = getSchemaInstanceFields(urlSchema, url, [
                             "linkImageUrl",
                             "linkText",
+                            "urlFrom",
                             "type"
                         ]);
                     }
@@ -1059,7 +994,7 @@ export function UrlExplorer() {
             }
 
             state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms";
-                // + " (cache had " + kvCache.size + " entries)";
+            // + " (cache had " + kvCache.size + " entries)";
             renderUrlExplorer();
         } catch (e) {
             state.status = "An error occured: " + e;
@@ -1085,6 +1020,7 @@ export function UrlExplorer() {
                     state._filteredDomains.push(domain);
                 }
             }
+            state._filteredDomains.sort((a, b) => (b.count || 0) - (a.count || 0));
         }
 
         // recompute filtered urls

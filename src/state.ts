@@ -60,12 +60,42 @@ export function sendLog(tabUrl: string, text: string) {
     return sendMessage({ tabUrl, type: "log", message: text });
 }
 
+let startedProcessing = 0;
+const messageQueue: Message[] = [];
+let recievingMessage = false;
 export function recieveMessage(
-    callback: (message: Message, sender: browser.Runtime.MessageSender, sendResponse: () => void) => Promise<any> | true | void,
+    callback: (message: Message, sender: browser.Runtime.MessageSender, sendResponse: () => void) => Promise<any>,
     _debug: string = "idk",
 ) {
-    browser.runtime.onMessage.addListener((...args) => {
-        callback(...args);
+    if (recievingMessage) {
+        throw new Error("Only one message listener may be present in a context");
+    }
+
+    recievingMessage = true;
+
+    // Staggering our message processing to avoid db read/write race conditions :(
+    browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+        messageQueue.push(message);
+        if (startedProcessing !== 0) {
+            return;
+        }
+
+        try {
+            startedProcessing = Date.now()
+
+            while (messageQueue.length > 0) {
+                const message = messageQueue.shift();
+                if (!message) {
+                    break;
+                }
+
+                logTrace("PROCESSING MESSAGE:", message.type, message, Date.now() - startedProcessing, Date.now())
+
+                await callback(message, sender, sendResponse);
+            }
+        } finally {
+            startedProcessing = 0;
+        }
     });
 }
 
@@ -243,6 +273,7 @@ const urlFields = [
     "type",
     "styleName",
     "attrName",
+    "urlFrom",
     "linkText",
     "linkImageUrl",
     "parentType",
@@ -374,8 +405,11 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
         for (const info of urls) {
             readTx[info.url] = getSchemaInstanceFields(urlSchema, info.url);
         }
-        readTx.domainUrls = Object.keys(domainMap).map(getDomainUrlsKey);
-        readTx["allDomains"] = "allDomains";
+        readTx.domainUrls = {}
+        for (const domain in domainMap) {
+            readTx.domainUrls[domain] = getDomainUrlsKey(domain);
+        }
+        readTx.allDomains = "allDomains";
 
         timer.logTime("Running read tx")
         data = await runReadTx(readTx);
@@ -403,10 +437,14 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
             if (hasNewItems(oldUrlIds, incomingUrlIds)) {
                 const merged = mergeArrays(oldUrlIds, incomingUrlIds);
                 writeDomainUrlKeys(writeTx, domain, merged!);
+
+                if (domain === "www.youtube.com") {
+                    console.log("updating www.youtube.com", { oldUrlIds, incomingUrlIds, merged })
+                }
             }
         }
 
-        const oldDomains = data["allDomains"];
+        const oldDomains = data.allDomains;
         const incomingDomains = Object.keys(domainMap);
         if (hasNewItems(oldDomains, incomingDomains)) {
             writeTx["allDomains"] = mergeArrays(oldDomains, incomingDomains);
