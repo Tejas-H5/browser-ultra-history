@@ -52,11 +52,6 @@ async function getKeys(keys?: null | string | string[]) {
         }
     }
 
-    console.log({
-        cacheMisses: unreadKeys,
-        cacheHits: data,
-    })
-
     const dbData = await defaultStorageArea.get(unreadKeys);
     for (const k of unreadKeys) {
         const val = dbData[k];

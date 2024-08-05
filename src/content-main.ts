@@ -1,7 +1,7 @@
 import { forEachMatch, } from "src/utils/re";
 import { onStateChange } from "./default-storage-area";
 import { EnabledFlags, UrlInfo, UrlType, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
-import { div, isVisibleElement, newRenderGroup } from "./utils/dom-utils";
+import { div, isVisibleElement, setText, setVisible } from "./utils/dom-utils";
 
 declare global {
     interface Window {
@@ -266,7 +266,7 @@ function getImageUrl(el: Element): string | null {
     }
 
     let parsed: string | null = null;
-    forEachMatch(url, cssUrlRegex(), (matches, start) => {
+    forEachMatch(url, cssUrlRegex(), (matches, _start) => {
         parsed = matches[1];
     });
 
@@ -556,21 +556,21 @@ function collectUrlsDebounced() {
 
 
 
-const rg = newRenderGroup();
 // NOTE: I've not figured out how to get css classes to work here yet, since it's a content script.
-const popupRoot = rg.if(() => !!currentMessage, (rg) => div({ 
+const popupRoot = div({ 
     style: "all: unset; z-index: 999999; font-family: monospace; font-size: 16px; position: fixed; bottom: 10px; left: 10px; background-color: black; color: white; text-align: right;" +
         "padding: 10px;"
-}, [
-    rg.text(() => currentMessage),
-]));
+});
 
 function renderPopup() {
-    if (isEnabled()) {
-        document.body.appendChild(popupRoot.el);
-        rg.render();
-    } else {
+    if (!isEnabled()) {
         popupRoot.el.remove();
+        return;
+    }
+
+    if (setVisible(popupRoot, !!currentMessage)) {
+        document.body.appendChild(popupRoot.el);
+        setText(popupRoot, currentMessage);
     }
 }
 

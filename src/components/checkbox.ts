@@ -1,5 +1,4 @@
-
-import { div, newComponent, newRenderGroup, newState, newStyleGenerator, on, setClass } from "src/utils/dom-utils";
+import { div, newComponent, newState, newStyleGenerator, on, setClass, setText } from "src/utils/dom-utils";
 
 const sg = newStyleGenerator();
 
@@ -17,23 +16,24 @@ export function Checkbox(initialLabel?: string) {
         onChange(val: boolean, e: MouseEvent): void;
     }>();
 
-    const rg = newRenderGroup();
-    const checkbox = div({ class: "row align-items-center" }, [
+    const checkbox = div({ class: `${cnCheckbox} w-100 h-100` });
+    const label = div({ style: "user-select: none" });
+    const root = div({ class: "row align-items-center" }, [
         div({ class: "solid-border-sm-rounded", style: "padding: 4px; width: 0.65em; height: 0.65em;" }, [
-            rg(
-                div({ class: `${cnCheckbox} w-100 h-100` }),
-                (el) => setClass(el, "checked", s.args.value)
-            )
+            checkbox,
         ]),
         div({ style: "width: 10px" }),
-        div({ style: "user-select: none" }, [ 
-            rg.text(() => s.args.label || initialLabel || "") 
-        ]),
+        label,
     ]);
 
-    on(checkbox, "click", (e) => {
+    on(root, "click", (e) => {
         s.args.onChange(!s.args.value, e);
     });
 
-    return newComponent(checkbox, rg.render, s);;
+    function render() {
+        setClass(checkbox, "checked", s.args.value)
+        setText(label, s.args.label || initialLabel || "");
+    }
+
+    return newComponent(root, render, s);;
 }

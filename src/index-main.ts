@@ -1,4 +1,4 @@
-import { appendChild, div, newComponent, newInsertable, newRenderGroup } from 'src/utils/dom-utils';
+import { appendChild, div, newComponent, newInsertable } from 'src/utils/dom-utils';
 import { onStateChange } from './default-storage-area';
 import { getTheme, setTheme } from './state';
 import { TopBar } from './top-bar';
@@ -9,22 +9,20 @@ if (process.env.ENVIRONMENT === "dev") {
 }
 
 function App() {
-    const rg = newRenderGroup();
+    const topBar = TopBar(true);
+    const urlExplorer = UrlExplorer();
+
     const appRoot = div({
         class: "fixed col", 
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
         div({ class: "flex-1 col" }, [
             div({ class: "sbb1" }, [
-                rg.c(TopBar(true)),
+                topBar,
             ]),
             div({ class: "flex-1 row " }, [
                 div({ class: "flex-1 col" }, [
-                    rg(UrlExplorer(), c => c.render({
-                        openInNewTab: true,
-                        onHighlightUrl(url) {
-                        }
-                    })),
+                    urlExplorer,
                 ]),
             ])
         ])
@@ -45,7 +43,11 @@ function App() {
     }
 
     function render() {
-        rg.render();
+        topBar.render(undefined);
+        urlExplorer.render({
+            openInNewTab: true, 
+            onHighlightUrl(_url) { },
+        });
     }
 
     async function renderAsync() {

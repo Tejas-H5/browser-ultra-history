@@ -328,34 +328,6 @@ export function saveUrlInfo(tx: WriteTx, urlInfo: UrlInfo, previousUrlInfo: UrlI
     return;
 }
 
-// checks if two string arrays are equal in contents. will sort them in place for the final comparison.
-// for some reason, writing data to the local storage area is VERY expensive (can take several seconds), so
-// we need to minimize the number of writes as much as possible, including only writing stuff if it changed.
-function compareArrays(arr1: string[] | undefined, arr2: string[] | undefined): boolean {
-    if (arr1 === undefined && arr2 === undefined) {
-        return true;
-    }
-
-    if ( arr1 === undefined || arr2 === undefined) {
-        return false;
-    }
-
-    if(arr1.length !== arr2.length) {
-        return false;
-    }
-
-    arr1.sort((a, b) => a.localeCompare(b));
-    arr2.sort((a, b) => a.localeCompare(b));
-
-    for (let i = 0; i < arr1.length; i++) {
-        if (arr1[i] !== arr2[i]) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 export function groupByUrlDomain(urls: UrlInfo[]): Record<string, UrlInfo[]> {
     return groupBy(urls, (info) => getUrlDomain(info.url));
 }
@@ -437,10 +409,6 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
             if (hasNewItems(oldUrlIds, incomingUrlIds)) {
                 const merged = mergeArrays(oldUrlIds, incomingUrlIds);
                 writeDomainUrlKeys(writeTx, domain, merged!);
-
-                if (domain === "www.youtube.com") {
-                    console.log("updating www.youtube.com", { oldUrlIds, incomingUrlIds, merged })
-                }
             }
         }
 
@@ -531,8 +499,6 @@ export async function deleteDomains(domainsToDelete: string[]) {
     }
     writeTx["allDomains"] = (data || []).filter((d: any) => !toDeleteSet.has(d));
 
-    console.log("Deleted: ", { data, domainsToDelete, writeTx });
-
     await runWriteTx(writeTx);
 }
 
@@ -591,19 +557,4 @@ export async function getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
 export async function collectUrlsFromActiveTab() {
     return await sendMessageToCurrentTab({ type: "content_collect_urls" });
 }
-
-// The badge only has room for 4 digits...
-const THOUSANDS_SUFFIXES = ["", "k", "m", "b", "t", "q", "s",];
-function formatNumberForBadge(num: number): string {
-    for (const s of THOUSANDS_SUFFIXES) {
-        if (num < 1000) {
-            return num + s;
-        }
-
-        num = Math.floor(num / 1000);
-    }
-
-    return "inf";
-}
-
 

@@ -1,4 +1,4 @@
-import { appendChild, div, newComponent, newInsertable, newRenderGroup, setVisible } from 'src/utils/dom-utils';
+import { appendChild, div, newComponent, newInsertable, setVisible } from 'src/utils/dom-utils';
 import { onStateChange } from './default-storage-area';
 import { renderContext } from './render-context';
 import { getTheme, sendMessageToCurrentTab, setTheme } from './state';
@@ -12,17 +12,15 @@ if (process.env.ENVIRONMENT === "dev") {
 // This page exists only for quick actions, and to link to the real extension page.
 // Also, it exists to navigate the 
 function PopupAppRoot() {
-    const rg = newRenderGroup();
+    const topBar = TopBar(false);
+    const urlExplorer = UrlExplorer();
     const appRoot = div({
         class: "fixed col",
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
-        rg.c(TopBar(false)),
+        topBar,
         div({ class: "flex-1 col" }, [
-            rg(UrlExplorer(), c => c.render({
-                openInNewTab: false,
-                onHighlightUrl,
-            })),
+            urlExplorer
         ]),
     ]);
 
@@ -43,7 +41,12 @@ function PopupAppRoot() {
     }
 
     function render() {
-        rg.render();
+        topBar.render(undefined);
+
+        urlExplorer.render({
+            openInNewTab: false,
+            onHighlightUrl,
+        });
     }
 
     async function renderAsync() {
