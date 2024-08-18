@@ -1,70 +1,44 @@
-import { appendChild, div, newComponent, newInsertable } from 'src/utils/dom-utils';
+import { RenderGroup, appendChild, div, newComponent, newInsertable } from 'src/utils/dom-utils';
 import { onStateChange } from './default-storage-area';
 import { getTheme, setTheme } from './state';
-import { TopBar } from './top-bar';
+import { makeTopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
 
 if (process.env.ENVIRONMENT === "dev") {
     console.log("Loaded main main extension page!!!")
 }
 
-function App() {
-    const topBar = TopBar(true);
-    const urlExplorer = UrlExplorer();
+const TopBar = makeTopBar(true);
 
-    const appRoot = div({
+function App(rg: RenderGroup) {
+    return div({
         class: "fixed col", 
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
         div({ class: "flex-1 col" }, [
             div({ class: "sbb1" }, [
-                topBar,
+                rg.cNull(TopBar),
             ]),
             div({ class: "flex-1 row " }, [
                 div({ class: "flex-1 col" }, [
-                    urlExplorer,
+                    rg.c(UrlExplorer, (c) => c.render({
+                        openInNewTab: true,
+                        onHighlightUrl(url) { },
+                    }))
                 ]),
             ])
         ])
     ]);
-
-    let fetching = false;
-    async function refetchState() {
-        try {
-            fetching = true;
-            render();
-        } catch (e) {
-            // TODO: Log the error in a better place
-            console.error("Error refetching main state:", e);
-        } finally {
-            fetching = false;
-            render();
-        }
-    }
-
-    function render() {
-        topBar.render(undefined);
-        urlExplorer.render({
-            openInNewTab: true, 
-            onHighlightUrl(_url) { },
-        });
-    }
-
-    async function renderAsync() {
-        await refetchState();
-    }
-
-    return newComponent(appRoot, () => renderAsync());
 }
 
-const app = App();
+const app = newComponent(App);
 appendChild(
     newInsertable(document.body),
     app
 );
 
 function rerenderApp() {
-    app.render(undefined);
+    app.render(null);
 }
 
 let stateChangeDebounceTimout = 0;

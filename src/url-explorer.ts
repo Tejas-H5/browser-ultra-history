@@ -1,9 +1,10 @@
 import { SKIP_READ_KEY, getSchemaInstanceFields, runReadTx } from "./default-storage-area";
 import { navigateToUrl } from "./open-pages";
+import { renderContext } from "./render-context";
 import { SmallButton } from "./small-button";
 import { UrlInfo, deleteDomains, deleteUrls, getCurrentTab, getUrlDomain, urlSchema } from "./state";
 import { clear } from "./utils/array-utils";
-import { addChildren, div, divClass, el, newComponent, newListRenderer, newState, newStyleGenerator, on, setAttr, setAttrs, setClass, setInputValue, setStyle, setText, setVisible, span } from "./utils/dom-utils";
+import { RenderGroup, div, el, getState, newComponent, newStyleGenerator, setAttr, setAttrs, setClass, setInputValue, setText, span } from "./utils/dom-utils";
 
 const DEBOUNCE_AMOUNT = 200;
 
@@ -71,76 +72,48 @@ function getFirstOrNone<T>(set: Set<T>): T | undefined {
     return undefined;
 }
 
-function UrlList() {
-    const s = newState<{
+function UrlList(rg: RenderGroup<{ state: UrlExplorerState }>) {
+    function ListItem(rg: RenderGroup<{
+        urlInfo: UrlInfo;
         state: UrlExplorerState;
-    }>();
+        urlText: string;
+        onClick(info: UrlInfo, type: SelectionType): void;
+        isSelected: boolean;
+        isTile: boolean;
 
-    function ListItem() {
-        const s = newState<{
-            urlInfo: UrlInfo;
-            state: UrlExplorerState;
-            urlText: string;
-            onClick(info: UrlInfo, type: SelectionType): void;
-            isSelected: boolean;
-            isTile: boolean;
-
-            isVisibleOnCurrentPage?: boolean;
-        }>();
-
-        const img = el<HTMLImageElement>("img");
-        const isVisibleEl = span();
-        const urlTextEl = span({ class: "b" });
-        const urlUrlEl = span({ class: "" });
-        const root = divClass(`hover-parent hover handle-long-words ${cnLinkItem}`, {}, [
-            setAttrs(img, { class: "w-100 checkerboard overflow-y-auto", loading: "lazy", style: "max-height: 200vh;" }),
+        isVisibleOnCurrentPage?: boolean;
+    }>) {
+        return div({ class: `hover-parent hover handle-long-words ${cnLinkItem}` }, [
+            rg.class("selected", s => s.isSelected),
+            rg.style("width", (s) => s.isTile ? "25%" : ""),
+            rg.style("textWrap", (s) => s.isTile ? "wrap" : ""),
+            rg.style("display", (s) => s.isTile ? "inline-block" : "block"),
+            rg.on("mousedown", (s, e) => {
+                const { onClick, urlInfo: linkInfo } = s;
+                onClick(linkInfo, getSelectionType(e));
+            }),
+            rg.if(
+                ({ state, urlInfo }) => state.showImages && !!urlInfo.linkImageUrl && urlInfo.linkImageUrl.length > 0,
+                (rg) => {
+                    return el<HTMLImageElement>("img", {
+                        class: "w-100 checkerboard overflow-y-auto",
+                        loading: "lazy",
+                        style: "max-height: 200vh;"
+                    }, [
+                        rg.attr("src", ({ urlInfo }) => urlInfo.linkImageUrl![urlInfo.linkImageUrl!.length - 1])
+                    ])
+                }
+            ),
             div({ class: "pre-wrap handle-long-words" }, [
-                isVisibleEl,
-                urlTextEl,
-                urlUrlEl,
+                span({}, rg.text(s => s.isVisibleOnCurrentPage ? "[Visible] " : "")),
+                span({ class: "b" }, rg.text(s => s.urlText)),
+                span({}, rg.text(s => " (" + s.urlInfo.url + ")"))
             ])
         ]);
-
-        function render() {
-            setText(isVisibleEl, s.args.isVisibleOnCurrentPage ? "[Visible] " : "");
-            setText(urlTextEl, s.args.urlText);
-            setText(urlUrlEl, " (" + s.args.urlInfo.url + ")");
-
-            setClass(root, "selected", s.args.isSelected);
-            if (s.args.isTile) {
-                setStyle(root, "width", "25%");
-                setStyle(root, "textWrap", "wrap");
-                setStyle(root, "display", "inline-block");
-            } else {
-                setStyle(root, "width", "");
-                setStyle(root, "textWrap", "");
-                setStyle(root, "display", "block");
-            }
-
-            const state = s.args.state;
-            const urlInfo = s.args.urlInfo;
-
-            if (setVisible(
-                img,
-                state.showImages
-                && urlInfo.linkImageUrl && urlInfo.linkImageUrl.length > 0
-            )) {
-                setAttr(img, "src", urlInfo.linkImageUrl![urlInfo.linkImageUrl!.length - 1]);
-            } else {
-                setAttr(img, "src", "");
-            }
-        }
-
-        on(root, "mousedown", (e) => {
-            const { onClick, urlInfo: linkInfo } = s.args;
-            onClick(linkInfo, getSelectionType(e));
-        });
-
-        return newComponent(root, render, s);
     }
 
     function onItemClick(urlInfo: UrlInfo, type: SelectionType) {
-        const { state } = s.args;
+        const { state } = getState(rg);
         const index = state._filteredUrls.findIndex(info => info === urlInfo);
         if (index === -1) {
             return;
@@ -162,51 +135,44 @@ function UrlList() {
         state.renderUrlExplorer();
     }
 
-    const listViewRoot = div({
-        class: "nowrap overflow-y-auto",
-        // Need padding for the scrollbar
-        style: "padding-bottom: 10px",
-    });
+    return div({ class: "flex-1 overflow-x-auto" }, [
+        rg.list(
+            div({
+                class: "nowrap overflow-y-auto",
+                // Need padding for the scrollbar style: "padding-bottom: 10px", 
+            }),
+            ListItem,
+            (s, getNext, listViewRoot) => {
+                const { _currentlyVisibleUrls, selectedUrls, _filteredUrls } = s.state;
 
+                // const isTileView = urlFilter.showAssets;
+                // Turns out that this view is better for viewing a large number of links as well. lol.
+                const isTileView = true;
 
-    const urlsList = newListRenderer(listViewRoot, ListItem);
-    const root = divClass("flex-1 overflow-x-auto", {}, [
-        urlsList,
-    ]);
+                setClass(listViewRoot, "col", !isTileView);
+                setClass(listViewRoot, "row", isTileView);
+                setClass(listViewRoot, "flex-wrap", isTileView);
 
-    function renderUrlList() {
-        urlsList.render((getNext) => {
-            const { _currentlyVisibleUrls, selectedUrls, _filteredUrls } = s.args.state;
+                for (const urlInfo of _filteredUrls) {
+                    const linkUrl = urlInfo.url;
+                    const isVisible = _currentlyVisibleUrls.has(linkUrl);
 
-            // const isTileView = urlFilter.showAssets;
-            // Turns out that this view is better for viewing a large number of links as well. lol.
-            const isTileView = true;
+                    getNext().render({
+                        // mainly for debugging, toggle as needed
+                        // index: i,
 
-            setClass(listViewRoot, "col", !isTileView);
-            setClass(listViewRoot, "row", isTileView);
-            setClass(listViewRoot, "flex-wrap", isTileView);
-
-            for (const urlInfo of _filteredUrls) {
-                const linkUrl = urlInfo.url;
-                const isVisible = _currentlyVisibleUrls.has(linkUrl);
-
-                getNext().render({
-                    // mainly for debugging, toggle as needed
-                    // index: i,
-
-                    urlInfo: urlInfo,
-                    urlText: formatStringArray(urlInfo.linkText, "<unknown link text>"),
-                    onClick: onItemClick,
-                    isVisibleOnCurrentPage: isVisible,
-                    isSelected: selectedUrls.has(urlInfo.url),
-                    isTile: isTileView,
-                    state: s.args.state,
-                });
+                        urlInfo: urlInfo,
+                        urlText: formatStringArray(urlInfo.linkText, "<unknown link text>"),
+                        onClick: onItemClick,
+                        isVisibleOnCurrentPage: isVisible,
+                        isSelected: selectedUrls.has(urlInfo.url),
+                        isTile: isTileView,
+                        state: s.state,
+                    });
+                }
             }
-        });
-    }
-
-    return newComponent(root, renderUrlList, s);
+        )
+    ])
 }
 
 const cnTextInput = sg.makeClass("text-input", [
@@ -214,31 +180,28 @@ const cnTextInput = sg.makeClass("text-input", [
     `:focus { background-color: var(--bg-color-focus); }`,
 ]);
 
-export function TextInput() {
-    const s = newState<{
-        text: string;
-        placeholder: string;
-        onChange(val: string): void;
-    }>();
+export function TextInput(rg: RenderGroup<{
+    text: string;
+    placeholder: string;
+    onChange(val: string): void;
+}>) {
+    function onEdit() {
+        const s = getState(rg);
+        s.onChange(input.el.value);
+    }
 
-    const input = el<HTMLInputElement>("input", { class: cnTextInput })
-    const root = div({ class: "row" }, [
-        input,
+    const input = el<HTMLInputElement>("input", { class: cnTextInput }, [
+        rg.on("input", onEdit),
+        rg.on("blur", onEdit),
+        rg.functionality((input, s) => {
+            setInputValue(input, s.text);
+            setAttr(input, "placeholder", s.placeholder);
+        })
     ]);
 
-    function render() {
-        setInputValue(input, s.args.text);
-        setAttr(input, "placeholder", s.args.placeholder);
-    }
-
-    function onEdit() {
-        s.args.onChange(input.el.value);
-    }
-
-    on(input, "input", onEdit);
-    on(input, "blur", onEdit);
-
-    return newComponent(root, render, s);
+    return div({ class: "row" }, [
+        input
+    ]);
 }
 
 function formatStringArray(str: string[] | undefined, defaultReturn: string) {
@@ -250,31 +213,25 @@ function formatStringArray(str: string[] | undefined, defaultReturn: string) {
 }
 
 // TODO: needs to render multiple urls
-export function UrlInfoDetails() {
-    const s = newState<{
-        urlInfo: UrlInfo;
-    }>();
-
-
+export function UrlInfoDetails(rg: RenderGroup<{ urlInfo: UrlInfo }>) {
     const mainTextEl = span({ class: "b" });
     const urlTextEl = span();
     const collectedFromEl = span();
-    const root = div({ class: "pre-wrap row handle-long-words" }, [
+
+    rg.renderFn(function renderUrlInfoDetails(s) {
+        const { urlInfo: { linkText, url, urlFrom } } = s;
+        setText(mainTextEl, formatStringArray(linkText, "<unknown link text>"));
+        setText(urlTextEl, "(" + url + ")");
+        setText(collectedFromEl, "Collected from " + formatStringArray(urlFrom, "<unkown url!!!>"));
+    });
+
+    return div({ class: "pre-wrap row handle-long-words" }, [
         mainTextEl,
         div({ style: "width: 20px;" }),
         urlTextEl,
         div({ style: "width: 20px;" }),
         collectedFromEl,
     ]);
-
-    function renderUrlInfoDetails() {
-        const { urlInfo: { linkText, url, urlFrom } } = s.args;
-        setText(mainTextEl, formatStringArray(linkText, "<unknown link text>"));
-        setText(urlTextEl, "(" + url + ")");
-        setText(collectedFromEl, "Collected from " + formatStringArray(urlFrom, "<unkown url!!!>"));
-    }
-
-    return newComponent(root, renderUrlInfoDetails, s);
 }
 
 
@@ -342,17 +299,21 @@ function getSelectionType(e: MouseEvent): SelectionType {
     return e.shiftKey ? "range" : (e.ctrlKey || e.metaKey) ? "toggle" : "replace";
 }
 
-function DomainsScreen() {
-    function DomainItem() {
-        const s = newState<{
-            domain: string;
-            count: number | undefined;
-            isChecked: boolean;
-            onChange(selectType: "replace" | "range" | "toggle"): void;
-        }>();
+function DomainsScreen(rg: RenderGroup<{
+    visible: boolean;
+    state: UrlExplorerState;
+}>) {
+    function DomainItem(rg: RenderGroup<{
+        domain: string;
+        count: number | undefined;
+        isChecked: boolean;
+        onChange(selectType: "replace" | "range" | "toggle"): void;
+    }>) {
 
         function getCountText(): string {
-            const count = s.args.count;
+            const s = getState(rg);
+
+            const count = s.count;
             if (count === undefined) {
                 return "unknown count";
             }
@@ -360,125 +321,134 @@ function DomainsScreen() {
             return "" + count;
         }
 
-        const root = div();
-        on(root, "mousedown", (e) => {
-            s.args.onChange(getSelectionType(e));
-        });
-
-        function renderDomainItem() {
-            const { isChecked, domain } = s.args;
-            setClass(root, "bg-color-focus", isChecked);
-            setText(root, domain + " (" + getCountText() + ")");
-        }
-
-        return newComponent(root, renderDomainItem, s);
+        return div({}, [
+            rg.class("bg-color-focus", s => s.isChecked),
+            rg.text(s => s.domain + " (" + getCountText() + ")"),
+            rg.on("mousedown", (s, e) => s.onChange(getSelectionType(e))),
+        ]);
     }
 
-    const s = newState<{
-        visible: boolean;
-        state: UrlExplorerState;
-    }>();
-
-    // TODO: literally use scroll container
-    const scrollContainer = div({
-        class: "nowrap overflow-y-auto",
-        // Need padding for the scrollbar
-        style: "padding-bottom: 10px"
-    });
-
-    const domainFilterInput = TextInput();
     let domainFilterInputDebounceTimeout = 0;
-    const noDomainsMessage = div({}, "No domains! Try browsing some internet");
-    const domainsList = newListRenderer(scrollContainer, DomainItem);
+    function handleFilterInputChange(val: string) {
+        const { state } = getState(rg);
+        clearTimeout(domainFilterInputDebounceTimeout);
+        domainFilterInputDebounceTimeout = setTimeout(() => {
+            state.domainFilter.urlContains = val;
+            state.renderUrlExplorer();
+        }, DEBOUNCE_AMOUNT)
+    }
 
-    const root = div({ class: "p-5 col", style: "max-height: 50%" }, [
-        div({ class: "align-items-center row gap-5" }, [
-            div({ class: "b", style: "padding-right: 10px" }, "Filters: "),
-            setAttrs(domainFilterInput, { style: "width: 100%" })
-        ]),
-        noDomainsMessage,
-        domainsList,
-    ]);
+    function handleDomainItemChange(i: number, type: SelectionType) {
+        const s = getState(rg);
+        const state = s.state;
+
+        // disable range-selections if they can't be done
+        const lastIdx = state._filteredDomainsLastSelectedIdx;
+        state._filteredDomainsLastSelectedIdx = i;
+
+        const domain = state._filteredDomains[i];
+        updateSelection(
+            domain.url,
+            i,
+            state.selectedDomains,
+            (i) => state._filteredDomains[i].url,
+            state._filteredDomains.length,
+            lastIdx,
+            type,
+        );
+
+        s.state.refetchData({ refetchUrls: true });
+
+        return;
+    }
+
 
     let lastVisible = false;
-    function renderDomainsScreen() {
-        const { visible, state } = s.args;
+    rg.renderFn(function renderDomainsScreen(s) {
+        const { visible, state } = s;
+        if (lastVisible === visible) {
+            return;
+        }
 
-        if (lastVisible !== setVisible(root, visible)) {
-            lastVisible = visible;
+        lastVisible = visible;
+        if (visible) {
             state.refetchData({ refetchDomains: true });
-            return;
         }
+    });
 
-        if (!lastVisible) {
-            return;
-        }
+    return rg.if(
+        (s) => s.visible,
+        (rg) =>
+            div({ class: "p-5 col", style: "max-height: 50%" }, [
+                div({ class: "align-items-center row gap-5" }, [
+                    div({ class: "b", style: "padding-right: 10px" }, "Filters: "),
+                    rg.inlineFn(
+                        setAttrs(newComponent(TextInput), { style: "width: 100%" }),
+                        (c, { state }) => c.render({
+                            text: state.domainFilter.urlContains,
+                            placeholder: "Domain contains...",
+                            onChange: handleFilterInputChange
+                        }),
+                    ),
+                ]),
+                rg.if((s) => s.state.allDomains.length === 0,
+                    rg => div({}, "No domains! Try browsing some internet"),
+                ),
+                rg.list(
+                    div({
+                        class: "nowrap overflow-y-auto",
+                        // Need padding for the scrollbar
+                        style: "padding-bottom: 10px"
+                    }),
+                    DomainItem,
+                    (s, getNext) => {
+                        const { state } = s;
 
-        setVisible(noDomainsMessage, state.allDomains.length === 0);
-
-        domainFilterInput.render({
-            text: state.domainFilter.urlContains,
-            placeholder: "Domain contains...",
-            onChange: (val) => {
-                clearTimeout(domainFilterInputDebounceTimeout);
-                domainFilterInputDebounceTimeout= setTimeout(() => {
-                    state.domainFilter.urlContains = val;
-                    state.renderUrlExplorer();
-                }, DEBOUNCE_AMOUNT)
-            }
-        });
-
-        domainsList.render((getNext) => {
-            const { state } = s.args;
-
-            for (let i = 0; i < state._filteredDomains.length; i++) {
-                const domain = state._filteredDomains[i];
-
-                const isSelected = state.selectedDomains.has(domain.url);
-                const c = getNext();
-
-                c.render({
-                    domain: domain.url,
-                    count: domain.count,
-                    isChecked: isSelected,
-                    onChange(type) {
-                        const state = s.args.state;
-
-                        // disable range-selections if they can't be done
-                        const lastIdx = state._filteredDomainsLastSelectedIdx;
-                        state._filteredDomainsLastSelectedIdx = i;
-
-                        updateSelection(
-                            domain.url,
-                            i,
-                            state.selectedDomains,
-                            (i) => state._filteredDomains[i].url,
-                            state._filteredDomains.length,
-                            lastIdx,
-                            type,
-                        );
-
-                        s.args.state.refetchData({ refetchUrls: true });
-
-                        return;
+                        for (let i = 0; i < state._filteredDomains.length; i++) {
+                            const domain = state._filteredDomains[i];
+                            const isSelected = state.selectedDomains.has(domain.url);
+                            getNext().render({
+                                domain: domain.url,
+                                count: domain.count,
+                                isChecked: isSelected,
+                                onChange(type) {
+                                    handleDomainItemChange(i, type);
+                                }
+                            });
+                        }
                     }
-                });
-            }
-        });
-    }
-
-    return newComponent(root, renderDomainsScreen, s);
+                ),
+            ])
+    )
 }
 
-function UrlsScreen() {
-    const s = newState<{
-        state: UrlExplorerState;
-        onNavigate(): void;
-        onHighlightUrl(url: string): void;
-    }>();
+function SelectedCount(rg: RenderGroup<{
+    state: UrlExplorerState;
+}>) {
+    return div({ class: "b row justify-content-center", style: "padding: 0 10px;" }, [
+        rg.text(({ state }) => {
+            const total = state.allUrls.size;
+            const filtered = state._filteredUrls.length;
+
+            return total !== filtered ? (
+                filtered + " / " + total
+            ) : (
+                "" + total
+            );
+
+        })
+    ]);
+}
+
+function UrlsScreen(rg: RenderGroup<{
+    state: UrlExplorerState;
+    onNavigate(): void;
+    onHighlightUrl(url: string): void;
+}>) {
 
     function getSelectedUrlText() {
-        const state = s.args.state;
+        const { state } = getState(rg);
+
         const sb = [];
         const sortedUrls = [...state.selectedUrls].sort();
         for (const url of sortedUrls) {
@@ -492,7 +462,7 @@ function UrlsScreen() {
     }
 
     function isCurrentUrlVisible(): boolean {
-        const state = s.args.state;
+        const { state } = getState(rg);
         const url = getFirstOrNone(state.selectedUrls);
         if (!url) {
             return false;
@@ -501,180 +471,148 @@ function UrlsScreen() {
     }
 
     function allUrlsSelected() {
-        const { state } = s.args;
+        const { state } = getState(rg);
         return state._filteredUrls.every(info => state.selectedUrls.has(info.url));
     }
 
-    const urlInfoDetails = UrlInfoDetails();
-    const selectedUrlsText = div({ class: "b" });
-    const urlFilterInput = TextInput();
     let urlFilterInputDebounceTimeout = 0;
-    const imagesEnabledButton = SmallButton();
-    const pagesFilterEnabledButton = SmallButton();
-    const assetsFilterEnabledButton = SmallButton();
-    const whereActionButton = SmallButton();
-    const openLinkActionButton = SmallButton();
-    const deleteSelectedUrlsActionButton = SmallButton();
-    const toggleSelectButton = SmallButton();
-    const selectedUrlsCountEl = div({ class: "b row justify-content-center", style: "padding: 0 10px;" });
-    const urlsList = UrlList();
+    function handleFilterInputChange(val: string) {
+        const s = getState(rg);
+        clearTimeout(urlFilterInputDebounceTimeout);
+        urlFilterInputDebounceTimeout = setTimeout(() => {
+            s.state.urlFilter.urlContains = val;
+            s.state.renderUrlExplorer();
+        }, DEBOUNCE_AMOUNT);
+    }
 
-    const root = div({ class: "flex-1 p-5 col" }, [
+    function handleToggleSelect() {
+        const { state } = getState(rg);
+        const shouldSelect = !allUrlsSelected();
+        for (const info of state._filteredUrls) {
+            setSelectedSet(state.selectedUrls, info.url, shouldSelect);
+        }
+        state.renderUrlExplorer();
+    }
+
+    function onHighlightSelected() {
+        const s = getState(rg);
+        const { state } = s;
+        const urlInfo = getCurrentUrlInfo(state);
+        if (urlInfo) {
+            s.onHighlightUrl(urlInfo.url);
+        }
+    }
+
+    async function handleDeleteSelectedUrls() {
+        const { state } = getState(rg);
+        if (!confirm(`Are you sure you want to delete these urls? (${state.selectedUrls.size})`)) {
+            return;
+        }
+
+        await deleteUrls([...state.selectedUrls]);
+        await state.refetchData({ refetchUrls: true, refetchDomains: true });
+    }
+
+    return div({ class: "flex-1 p-5 col" }, [
         makeSeparator(),
         div({ class: "row justify-content-center" }, [
-            urlInfoDetails,
+            rg.with(
+                ({ state }) => {
+                    const urlInfo = getCurrentUrlInfo(state)
+                    return urlInfo ? { urlInfo } : undefined;
+                },
+                UrlInfoDetails
+            )
         ]),
         makeSeparator(),
-        selectedUrlsText,
+        div({ class: "b" }, [
+            rg.text(() => getSelectedUrlText() || "...")
+        ]),
         div({ class: "row gap-5 align-items-center", style: "padding: 0 10px" }, [
             div({ class: "b", style: "padding-right: 10px" }, "Filters: "),
             div({ class: "flex-1" }, [
-                setAttrs(urlFilterInput, { style: "width: 100%" }),
+                rg.inlineFn(
+                    setAttrs(newComponent(TextInput), { style: "width: 100%" }),
+                    (c, s) => c.render({
+                        text: s.state.urlFilter.urlContains,
+                        placeholder: "Url contains...",
+                        onChange: handleFilterInputChange
+                    })
+                )
             ]),
-            imagesEnabledButton,
+            rg.c(SmallButton, (c, s) => c.render({
+                text: "Images " + (s.state.showImages ? "enabled" : "disabled"),
+                onClick() {
+                    s.state.showImages = !s.state.showImages;
+                    s.state.renderUrlExplorer();
+                },
+                toggled: s.state.showImages,
+                noBorderRadius: true,
+            })),
             span({}, "|"),
-            pagesFilterEnabledButton,
-            assetsFilterEnabledButton,
+            rg.c(SmallButton, (c, s) => c.render({
+                text: "Pages",
+                onClick() {
+                    s.state.urlFilter.showPages = !s.state.urlFilter.showPages;
+                    s.state.renderUrlExplorer();
+                },
+                toggled: s.state.urlFilter.showPages,
+                noBorderRadius: true,
+            })),
+            rg.c(SmallButton, (c, s) => c.render({
+                text: "Assets",
+                onClick() {
+                    s.state.urlFilter.showAssets = !s.state.urlFilter.showAssets;
+                    s.state.renderUrlExplorer();
+                },
+                toggled: s.state.urlFilter.showAssets,
+                noBorderRadius: true,
+            })),
         ]),
         makeSeparator(),
         div({ class: "row gap-5 align-items-center", style: "padding: 0 5px;" }, [
-            whereActionButton, 
-            openLinkActionButton,
-            setAttrs(toggleSelectButton, { class: " nowrap" }, true),
+            rg.if(
+                isCurrentUrlVisible,
+                rg => rg.c(SmallButton, (c) => c.render({
+                    text: "Where?",
+                    onClick: onHighlightSelected,
+                }))
+            ),
+            rg.if(
+                (s) => s.state.selectedUrls.size > 0,
+                rg => rg.c(SmallButton, (c, s) => c.render({
+                    text: s.state.selectedUrls.size === 1 ? "Open link" : "Open several links",
+                    onClick: s.onNavigate,
+                }))
+            ),
+            rg.inlineFn(
+                setAttrs(newComponent(SmallButton), { class: " nowrap" }, true),
+                (c) => c.render({
+                    text: allUrlsSelected() ? "Deselect all" : "Select all",
+                    onClick: handleToggleSelect,
+                })
+            ),
             div({ style: "width: 100px" }),
-            deleteSelectedUrlsActionButton,
+            rg.if(
+                ({ state }) => state.selectedUrls.size > 0,
+                rg => rg.c(SmallButton, (c) => c.render({
+                    text: "Delete selected urls",
+                    onClick: handleDeleteSelectedUrls,
+                }))
+            ),
             div({ class: "flex-1" }),
-            selectedUrlsCountEl,
+            rg.c(SelectedCount, (c, s) => c.render(s)),
             div({ class: "flex-1" }),
         ]),
         makeSeparator(),
         div({ class: "flex-1 col" }, [
-            urlsList,
+            rg.c(UrlList, (c, s) => c.render({
+                // TODO: links on this domain/ TODO: links on this domain
+                state: s.state
+            }))
         ]),
         makeSeparator(),
     ]);
-
-    function onHighlightSelected() {
-        const { state } = s.args;
-        const urlInfo = getCurrentUrlInfo(state);
-        if (urlInfo) {
-            s.args.onHighlightUrl(urlInfo.url);
-        }
-    }
-
-    function renderUrlsScreen() {
-        const { state } = s.args;
-
-        const currentUrlInfo = getCurrentUrlInfo(state);
-        if (setVisible(urlInfoDetails, currentUrlInfo)) {
-            urlInfoDetails.render({ urlInfo: currentUrlInfo })
-        }
-
-        setText(selectedUrlsText, getSelectedUrlText() || "...");
-
-        urlFilterInput.render({
-            text: s.args.state.urlFilter.urlContains,
-            placeholder: "Url contains...",
-            onChange(val) {
-                clearTimeout(urlFilterInputDebounceTimeout);
-                urlFilterInputDebounceTimeout = setTimeout(() => {
-                    s.args.state.urlFilter.urlContains = val;
-                    s.args.state.renderUrlExplorer();
-                }, DEBOUNCE_AMOUNT);
-            },
-        });
-
-        imagesEnabledButton.render({
-            text: "Images " + (s.args.state.showImages ? "enabled" : "disabled"),
-            onClick() {
-                s.args.state.showImages = !s.args.state.showImages;
-                s.args.state.renderUrlExplorer();
-            },
-            toggled: s.args.state.showImages,
-            noBorderRadius: true,
-        });
-
-        pagesFilterEnabledButton.render({
-            text: "Pages",
-            onClick() {
-                s.args.state.urlFilter.showPages = !s.args.state.urlFilter.showPages;
-                s.args.state.renderUrlExplorer();
-            },
-            toggled: s.args.state.urlFilter.showPages,
-            noBorderRadius: true,
-        });
-
-        assetsFilterEnabledButton.render({
-            text: "Assets",
-            onClick() {
-                s.args.state.urlFilter.showAssets = !s.args.state.urlFilter.showAssets;
-                s.args.state.renderUrlExplorer();
-            },
-            toggled: s.args.state.urlFilter.showAssets,
-            noBorderRadius: true,
-        });
-
-        if (setVisible(whereActionButton, isCurrentUrlVisible())) {
-            whereActionButton.render({
-                text: "Where?",
-                onClick: onHighlightSelected,
-            });
-        }
-
-        if (setVisible(openLinkActionButton, state.selectedUrls.size > 0)) {
-            openLinkActionButton.render({
-                text: s.args.state.selectedUrls.size === 1 ? "Open link" : "Open several links",
-                onClick() {
-                    s.args.onNavigate();
-                }
-            });
-        }
-
-        toggleSelectButton.render({
-            text: allUrlsSelected() ? "Deselect all" : "Select all",
-            onClick() {
-                const { state } = s.args;
-                const shouldSelect = !allUrlsSelected();
-                for (const info of state._filteredUrls) {
-                    setSelectedSet(state.selectedUrls, info.url, shouldSelect);
-                }
-                state.renderUrlExplorer();
-            }
-        });
-
-        if (setVisible(deleteSelectedUrlsActionButton, state.selectedUrls.size > 0)) {
-            deleteSelectedUrlsActionButton.render({
-                text: "Delete selected urls",
-                async onClick() {
-                    const { state } = s.args;
-                    if (!confirm(`Are you sure you want to delete these urls? (${state.selectedUrls.size})`)) {
-                        return;
-                    }
-
-                    await deleteUrls([...state.selectedUrls]);
-                    await state.refetchData({ refetchUrls: true, refetchDomains: true });
-                }
-            });
-        }
-
-        {
-            const total = state.allUrls.size;
-            const filtered = state._filteredUrls.length;
-
-            setText(selectedUrlsCountEl, total !== filtered ? (
-                filtered + " / " + total
-            ) : (
-                "" + total
-            ));
-        }
-
-        urlsList.render({
-            // TODO: links on this domain
-            state: s.args.state,
-        });
-    }
-
-    return newComponent(root, renderUrlsScreen, s);
 }
 
 
@@ -788,15 +726,12 @@ function getCurrentUrlInfo(state: UrlExplorerState): UrlInfo | undefined {
 }
 
 
-export function UrlExplorer() {
-    const s = newState<{
-        openInNewTab: boolean;
-        onHighlightUrl(url: string): void;
-    }>();
-
+export function UrlExplorer(rg: RenderGroup<{
+    openInNewTab: boolean;
+    onHighlightUrl(url: string): void;
+}>) {
     const state: UrlExplorerState = {
         // data structures that hold urls
-
 
         renderUrlExplorer,
         refetchData,
@@ -820,7 +755,7 @@ export function UrlExplorer() {
             showAssets: false,
             showPages: true,
         }
-    }
+    };
 
     function getDomainsText(): string {
         const sb = [];
@@ -841,33 +776,70 @@ export function UrlExplorer() {
         return state._filteredDomains.every(d => state.selectedDomains.has(d.url));
     }
 
-    const showHideDomainsButton = SmallButton();
-    const domainActionsRow = div({ class: "pointer b row p-5", style: "gap: 10px;" });
-    const selectDomainsToggleButton = SmallButton();
-    const deleteSelectedDomainsButton = SmallButton();
-    const selectedDomainsText = span();
-    const domainsScreen = DomainsScreen();
-    const urlsScreen = UrlsScreen();
-    const statusText = div();
+    function handleShowHideDomains() {
+        if (state.currentScreen === "url") {
+            state.currentScreen = "domain";
+        } else {
+            state.currentScreen = "url";
+        }
 
-    const root = div({ class: "flex-1 p-5 col" }, [
-        div({ class: "pointer b row p-5", style: "gap: 10px;" }, [
-            showHideDomainsButton,
-            addChildren(domainActionsRow, [ 
-                setAttrs(selectDomainsToggleButton, { class: " nowrap" }, true)
-            ]),
-            div({ style: "width: 50px" }),
-            setAttrs(deleteSelectedDomainsButton, { class: " nowrap" }, true),
-            div({ class: "flex-1" }),
-            selectedDomainsText,
-            div({ class: "flex-1" }),
-        ]),
-        domainsScreen,
-        urlsScreen,
-        makeSeparator(),
-        statusText,
-    ]);
+        renderUrlExplorer();
+    }
 
+    function handleSelectDeselectDomains() {
+        const shouldSelect = !allDomainsSelected();
+        for (const domain of state._filteredDomains) {
+            setSelectedSet(state.selectedDomains, domain.url, shouldSelect);
+        }
+        state.refetchData({ refetchUrls: true });
+    }
+
+    function handleNavigate() {
+        const s = getState(rg);
+
+        if (state.selectedUrls.size === 0) {
+            return;
+        }
+
+        const urlInfo = getCurrentUrlInfo(state);
+        if (urlInfo) {
+            if (s.openInNewTab) {
+                navigateToUrl(urlInfo.url, true, false);
+            } else {
+                navigateToUrl(urlInfo.url, false, false);
+            }
+            return;
+        }
+
+        // several confirm dialogs (peak UI design, actually) ...
+        {
+            if (
+                state.selectedUrls.size > 10
+                && !confirm("You're about to open " + state.selectedUrls.size + " new tabs. Are you sure?")
+            ) {
+                return;
+            }
+
+            if (
+                state.selectedUrls.size > 50
+                && !confirm("You sure? " + state.selectedUrls.size + " new urls sounds like a bad idea")
+            ) {
+                return;
+            }
+
+            if (
+                state.selectedUrls.size > 100
+                && !confirm("No really, " + state.selectedUrls.size + " sounds like terrible idea. Most computers don't have enough ram for 20 new tabs! I shouldn't even be letting you do this! I hope you know what you're doing...")
+            ) {
+                return;
+            }
+        }
+
+        // if multiple selected, open them all in new tabs without leaving the current tab.
+        for (const url of state.selectedUrls) {
+            navigateToUrl(url, true, false);
+        }
+    }
 
     async function refetchData(options: UrlExplorerStateRefetchOptions) {
         try {
@@ -919,6 +891,22 @@ export function UrlExplorer() {
                 const tab = await getCurrentTab();
                 const tabId = tab?.id;
                 const tabUrl = tab?.url;
+
+                // make sure we have a domain enabled if applicable
+                {
+                    if (state.selectedDomains.size === 0 && tabUrl) {
+                        const tabDomain = getUrlDomain(tabUrl);
+                        if (state.allDomains.find(d => d.url === tabDomain)) {
+                            setSelectedSet(state.selectedDomains, tabDomain, true);
+                        } else {
+                            setSelectedSet(state.selectedDomains, tabDomain, false);
+                        }
+                    }
+
+                    if (state.selectedDomains.size === 0 && state.allDomains.length > 0) {
+                        state.selectedDomains.add(state.allDomains[0].url);
+                    }
+                }
 
                 // fetch all domains and urls
                 const allUrls = [];
@@ -993,142 +981,84 @@ export function UrlExplorer() {
 
                     renderUrlExplorer();
                 }
-
-                // make sure we have a domain enabled if applicable
-                {
-                    if (state.selectedDomains.size === 0 && tabUrl) {
-                        const tabDomain = getUrlDomain(tabUrl);
-                        if (state.allDomains.find(d => d.url === tabDomain)) {
-                            setSelectedSet(state.selectedDomains, tabDomain, true);
-                        } else {
-                            setSelectedSet(state.selectedDomains, tabDomain, false);
-                        }
-                    }
-
-                    if (state.selectedDomains.size === 0 && state.allDomains.length > 0) {
-                        state.selectedDomains.add(state.allDomains[0].url);
-                    }
-                }
             }
 
             state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms";
             // + " (cache had " + kvCache.size + " entries)";
             renderUrlExplorer();
         } catch (e) {
+            console.error(e);
             state.status = "An error occured: " + e;
             renderUrlExplorer();
         }
     }
 
     function renderUrlExplorer() {
-        // recompute state before anything is rendered
+        rg.renderWithCurrentState();
+    }
+
+    let fetchedOnce = false;
+    rg.renderFn(() => {
         recomputeState(state);
 
-        showHideDomainsButton.render({
-            text: state.currentScreen === "url" ? "Show domains" : "Hide domains",
-            onClick() {
-                if (state.currentScreen === "url") {
-                    state.currentScreen = "domain";
-                    renderUrlExplorer();
-                } else {
-                    state.currentScreen = "url";
-                    renderAsync();
-                }
-            }
-        });
-
-        if (setVisible(domainActionsRow, state.currentScreen === "domain")) {
-            selectDomainsToggleButton.render({
-                text: allDomainsSelected() ? "Deselect all" : "Select all",
-                onClick() {
-                    const shouldSelect = !allDomainsSelected();
-                    for (const domain of state._filteredDomains) {
-                        setSelectedSet(state.selectedDomains, domain.url, shouldSelect);
-                    }
-                    state.refetchData({ refetchUrls: true });
-                }
-            });
+        if (!fetchedOnce) {
+            fetchedOnce = true;
+            refetchData({ refetchDomains: true, refetchUrls: true });
         }
+    })
 
-        if (setVisible(deleteSelectedDomainsButton, state.selectedDomains.size > 0)) {
-            deleteSelectedDomainsButton.render({
-                text: "Delete selected domains",
-                async onClick() {
-                    if (!confirm(`Are you sure you want to delete these domains? (${state.selectedDomains.size})`)) {
-                        return;
-                    }
+    return div({ class: "flex-1 p-5 col" }, [
+        div({ class: "pointer b row p-5", style: "gap: 10px;" }, [
+            rg.c(SmallButton, (c) => c.render({
+                text: state.currentScreen === "url" ? "▶ Show domains" : "▼ Hide domains",
+                onClick: handleShowHideDomains
+            })),
+            rg.if(
+                () => state.currentScreen === "domain",
+                rg => div({ class: "pointer b row p-5", style: "gap: 10px;" }, [
+                    rg.inlineFn(
+                        setAttrs(newComponent(SmallButton), { class: " nowrap" }, true),
+                        (c) => c.render({
+                            text: allDomainsSelected() ? "Deselect all" : "Select all",
+                            onClick: handleSelectDeselectDomains,
+                        })
+                    )
+                ])
+            ),
+            div({ style: "width: 50px" }),
+            rg.if(
+                () => state.currentScreen === "domain" && state.selectedDomains.size > 0,
+                rg => rg.inlineFn(
+                    setAttrs(newComponent(SmallButton), { class: " nowrap" }, true),
+                    (c) => c.render({
+                        text: "Delete selected domains",
+                        async onClick() {
+                            if (!confirm(`Are you sure you want to delete these domains? (${state.selectedDomains.size})`)) {
+                                return;
+                            }
 
-                    await deleteDomains([...state.selectedDomains]);
-                    await state.refetchData({ refetchUrls: true });
-                }
-            });
-        }
-
-        setText(
-            selectedDomainsText, 
-            getDomainsText() + " " + state.selectedDomains.size + "/" + state.allDomains.length || "<No domain>"
-        );
-
-        domainsScreen.render({
+                            await deleteDomains([...state.selectedDomains]);
+                            await state.refetchData({ refetchUrls: true });
+                        }
+                    })
+                )
+            ),
+            div({ class: "flex-1" }),
+            rg.text(() => getDomainsText() + " " + state.selectedDomains.size + "/" + state.allDomains.length || "<No domain>"),
+            div({ class: "flex-1" }),
+        ]),
+        rg.c(DomainsScreen, (c) => c.render({
             state,
             visible: state.currentScreen === "domain",
-        });
-
-        urlsScreen.render({
+        })),
+        rg.c(UrlsScreen, (c, s) => c.render({
             state,
-            onNavigate() {
-                if (state.selectedUrls.size === 0) {
-                    return;
-                }
-
-                const urlInfo = getCurrentUrlInfo(state);
-                if (urlInfo) {
-                    if (s.args.openInNewTab) {
-                        navigateToUrl(urlInfo.url, true, false);
-                    } else {
-                        navigateToUrl(urlInfo.url, false, false);
-                    }
-                    return;
-                }
-
-                // several confirm dialogs (peak UI design, actually) ...
-                {
-                    if (
-                        state.selectedUrls.size > 10
-                        && !confirm("You're about to open " + state.selectedUrls.size + " new tabs. Are you sure?")
-                    ) {
-                        return;
-                    }
-
-                    if (
-                        state.selectedUrls.size > 50
-                        && !confirm("You sure? " + state.selectedUrls.size + " new urls sounds like a bad idea")
-                    ) {
-                        return;
-                    }
-
-                    if (
-                        state.selectedUrls.size > 100
-                        && !confirm("No really, " + state.selectedUrls.size + " sounds like terrible idea. Most computers don't have enough ram for 20 new tabs! I shouldn't even be letting you do this! I hope you know what you're doing...")
-                    ) {
-                        return;
-                    }
-                }
-
-                // if multiple selected, open them all in new tabs without leaving the current tab.
-                for (const url of state.selectedUrls) {
-                    navigateToUrl(url, true, false);
-                }
-            },
-            onHighlightUrl: s.args.onHighlightUrl,
-        });
-
-        setText(statusText, state.status);
-    }
-
-    function renderAsync() {
-        refetchData({ refetchDomains: true, refetchUrls: true });
-    }
-
-    return newComponent(root, renderAsync, s);
+            onNavigate: handleNavigate,
+            onHighlightUrl: s.onHighlightUrl,
+        })),
+        makeSeparator(),
+        div({}, [
+            rg.text(() => state.status),
+        ])
+    ]);
 }
