@@ -4,13 +4,19 @@ export type Insertable<T extends ValidElement = HTMLElement> = {
     _isHidden: boolean;
 };
 
+export type InsertableList = (Insertable<any> | undefined)[];
+
 /**
  * Attemps to replace all of the children under a component in such a way that
  * if comp.el.children[i] === children[i].el, no actions are performed.
  *
  * This way, the code path where no data has changed can remain reasonably performant
  */
-export function replaceChildren(comp: Insertable, children: (Insertable | undefined)[]) {
+export function replaceChildren(comp: Insertable<any>, children: InsertableList) {
+    replaceChildrenEl(comp.el, children);
+};
+
+export function replaceChildrenEl(el: Element, children: InsertableList) {
     let iReal = 0;
     for (let i = 0; i < children.length; i++) {
         const child = children[i];
@@ -18,14 +24,14 @@ export function replaceChildren(comp: Insertable, children: (Insertable | undefi
             continue;
         }
 
-        setChildAt(comp, child, i);
+        setChildAtEl(el, child, i);
         iReal++;
     }
 
-    while (comp.el.children.length > iReal) {
-        comp.el.children[comp.el.children.length - 1].remove();
+    while (el.children.length > iReal) {
+        el.children[el.children.length - 1].remove();
     }
-};
+}
 
 /**
  * Attempts to append a child onto the end of a component, but in such a way that
@@ -34,8 +40,13 @@ export function replaceChildren(comp: Insertable, children: (Insertable | undefi
  *
  * This way, the code path where no data has changed can remain reasonably performant
  */
-export function appendChild<T extends ValidElement, U extends ValidElement>(mountPoint: Insertable<T>, child: Insertable<U>) {
-    const children = mountPoint.el.children;
+export function appendChild(mountPoint: Insertable<any>, child: Insertable<any>) {
+    const el = mountPoint.el;
+    appendChildEl(el, child);
+};
+
+export function appendChildEl(mountPointEl: Element, child: Insertable<any>) {
+    const children = mountPointEl.children;
     if (children.length > 0 && children[children.length - 1] === child.el) {
         // This actually increases performance as well.
         // Because of this return statement, list renderers whos children haven't changed at all can be rerendered 
@@ -44,21 +55,23 @@ export function appendChild<T extends ValidElement, U extends ValidElement>(moun
         return;
     }
 
-    mountPoint.el.appendChild(child.el);
-};
+    mountPointEl.appendChild(child.el);
+}
 
 /**
  * Attempts to set the ith child on {@link mountPoint} to {@link child}.
  * If this is already the case, no actions are performed.
  * This way, the code path where no data has changed can remain reasonably performant
  */
-export function setChildAt<T extends ValidElement, U extends ValidElement>(
-    mountPoint: Insertable<T>, child: Insertable<U>, i: number,
-) {
-    const children = mountPoint.el.children;
+export function setChildAt(mountPoint: Insertable<any>, child: Insertable<any>, i: number,) {
+    setChildAtEl(mountPoint.el, child, i);
+}
+
+export function setChildAtEl(mountPointEl: Element, child: Insertable<any>, i: number) {
+    const children = mountPointEl.children;
 
     if (i === children.length) {
-        appendChild(mountPoint, child);
+        appendChildEl(mountPointEl, child);
     }
 
     if (children[i] === child.el) {
@@ -66,7 +79,7 @@ export function setChildAt<T extends ValidElement, U extends ValidElement>(
         return;
     }
 
-    mountPoint.el.replaceChild(child.el, children[i]);
+    mountPointEl.replaceChild(child.el, children[i]);
 }
 
 /**
@@ -75,7 +88,7 @@ export function setChildAt<T extends ValidElement, U extends ValidElement>(
  *
  * NOTE: I've never used this method in practice, so there may be glaring flaws...
  */
-export function removeChild(mountPoint: Insertable, child: Insertable) {
+export function removeChild(mountPoint: Insertable<any>, child: Insertable) {
     const childParent = child.el.parentElement;
     if (!childParent) {
         return;
@@ -93,7 +106,7 @@ export function removeChild(mountPoint: Insertable, child: Insertable) {
  *
  * NOTE: I've never used this method in practice, so there may be glaring flaws...
  */
-export function clearChildren(mountPoint: Insertable) {
+export function clearChildren(mountPoint: Insertable<any>) {
     mountPoint.el.replaceChildren();
 };
 
@@ -259,21 +272,24 @@ export function setAttrs<T extends ValidElement, C extends Insertable<T>>(
     return ins;
 }
 
-export function addChildren<T extends ValidElement>(ins: Insertable<T>, children: ChildList<T>): Insertable<T> {
+export function addChildren<T extends ValidElement>(ins: Insertable<T>, children: InsertableInitializerList<T>): Insertable<T> {
     const element = ins.el;
 
     if (!Array.isArray(children)) {
         children = [children];
     }
 
-    for (const c of children) {
+    for (let c of children) {
         if (c === false) {
             continue;
         }
 
         if (typeof c === "function") {
-            c(ins);
-            continue;
+            const res = c(ins);
+            if (!res) {
+                continue;
+            }
+            c = res;
         }
 
         if (Array.isArray(c)) {
@@ -299,7 +315,7 @@ export function addChildren<T extends ValidElement>(ins: Insertable<T>, children
 export function elSvg<T extends SVGElement>(
     type: string,
     attrs?: Attrs,
-    children?: ChildList<T>,
+    children?: InsertableInitializerList<T>,
 ) {
     const xmlNamespace = "http://www.w3.org/2000/svg";
     const svgEl = document.createElementNS(xmlNamespace, type) as T;
@@ -319,7 +335,7 @@ export function elSvg<T extends SVGElement>(
 export function el<T extends HTMLElement>(
     type: string,
     attrs?: Attrs,
-    children?: ChildList<T>,
+    children?: InsertableInitializerList<T>,
 ): Insertable<T> {
     const element = document.createElement(type) as T;
     return elInternal(element, attrs, children);
@@ -328,7 +344,7 @@ export function el<T extends HTMLElement>(
 function elInternal<T extends ValidElement>(
     element: T,
     attrs?: Attrs,
-    children?: ChildList<T>,
+    children?: InsertableInitializerList<T>,
 ): Insertable<T> {
     const insertable = newInsertable<T>(element);
 
@@ -343,12 +359,14 @@ function elInternal<T extends ValidElement>(
     return insertable;
 }
 
-// A function passed as a 'child' will be invoked on the parent once when it's being constructed.
-// This mainly allows events and other initializations for an Insertable to be done declaratively
-// just under the line instantiating it, instead of in some far-away code.
-type Functionality<T extends ValidElement> = (parent: Insertable<T>) => void;
-type ChildListElement<T extends ValidElement> = Insertable<ValidElement> | string | false | Functionality<T>;
-export type ChildList<T extends ValidElement> = ChildListElement<T> | ChildListElement<T>[];
+/**
+ * A function passed as a 'child' will be invoked on the parent once when it's being constructed.
+ * This function will have access to the current parent, so it may hook up various event handlers.
+ * It may also return an Insertable, which can be useful in some scenarios.
+ */
+type Functionality<T extends ValidElement> = (parent: Insertable<T>) => void | Insertable<any>;
+type InsertableInitializerListItem<T extends ValidElement> = Insertable<ValidElement> | string | false | Functionality<T>;
+export type InsertableInitializerList<T extends ValidElement = HTMLElement> = InsertableInitializerListItem<T> | InsertableInitializerListItem<T>[];
 
 /**
  * Creates a div, gives it some attributes, and then appends some children. 
@@ -358,11 +376,11 @@ export type ChildList<T extends ValidElement> = ChildListElement<T> | ChildListE
  *
  * NOTE: For svg elements, you'll need to use `elSvg`
  */
-export function div(attrs?: Attrs, children?: ChildList<HTMLDivElement>) {
+export function div(attrs?: Attrs, children?: InsertableInitializerList<HTMLDivElement>) {
     return el<HTMLDivElement>("DIV", attrs, children);
 }
 
-export function span(attrs?: Attrs, children?: ChildList<HTMLSpanElement>) {
+export function span(attrs?: Attrs, children?: InsertableInitializerList<HTMLSpanElement>) {
     return el<HTMLSpanElement>("SPAN", attrs, children);
 }
 
@@ -715,6 +733,12 @@ export type RenderGroup<S = null> = {
      */
     functionality: <U extends ValidElement> (fn: (val: Insertable<U>, s: S) => void) => Functionality<U>;
     /**
+     * Returns functionality that will replace the DOM nodes of the current with the insertables provided in a children array.
+     * You should only have one of thse per dom element. There are currently no checks in place to assert if this is the case or not.
+     * NOTE: this solution will need some work
+     */
+    children: <U extends ValidElement>(childArrayFn: (s: S) => InsertableList) => Functionality<U>;
+    /**
      * Appends a custom render function to this render group. Usefull for adding functionality to the render group
      * that has nothing to do with the DOM or the UI, or if you find it better to use an imperative approach to 
      * writing a particular component. 
@@ -959,6 +983,11 @@ function newRenderGroup<S, Si extends S>(
                 const currentStyle = parent.el.style[styleName];
                 rg.renderFn((s) => setStyle(parent, styleName, valueFn(s) || currentStyle), parent);
             };
+        },
+        children: (childArrayFn) => {
+            return (parent) => {
+                rg.renderFn((s) => replaceChildren(parent, childArrayFn(s)))
+            }
         },
         functionality: (fn) => {
             return (parent) => {
