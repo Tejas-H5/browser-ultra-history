@@ -1,4 +1,4 @@
-import { RenderGroup, div, getState, newComponent, } from 'src/utils/dom-utils';
+import { RenderGroup, div } from 'src/utils/dom-utils';
 import { openExtensionTab } from './open-pages';
 import { renderContext } from './render-context';
 import { SmallButton } from './small-button';
@@ -27,7 +27,7 @@ export function makeTopBar(isMain: boolean) {
             }
         }
 
-        rg.renderFn(() => {
+        rg.preRenderFn(() => {
             if (needsRefetch || renderContext.forceRefetch) {
                 needsRefetch = false;
                 refetchState();

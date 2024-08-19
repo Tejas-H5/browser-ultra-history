@@ -218,7 +218,7 @@ export function UrlInfoDetails(rg: RenderGroup<{ urlInfo: UrlInfo }>) {
     const urlTextEl = div({ class: "inline-block" });
     const collectedFromEl = div({ class: "inline-block" });
 
-    rg.renderFn(function renderUrlInfoDetails(s) {
+    rg.preRenderFn(function renderUrlInfoDetails(s) {
         const { urlInfo: { linkText, url, urlFrom } } = s;
         setText(mainTextEl, formatStringArray(linkText, "<unknown link text>"));
         setText(urlTextEl, "(" + url + ")");
@@ -366,7 +366,7 @@ function DomainsScreen(rg: RenderGroup<{
 
 
     let lastVisible = false;
-    rg.renderFn(function renderDomainsScreen(s) {
+    rg.preRenderFn(function renderDomainsScreen(s) {
         const { visible, state } = s;
         if (lastVisible === visible) {
             return;
@@ -1037,7 +1037,7 @@ export function UrlExplorer(rg: RenderGroup<{
     }
 
     let fetchedOnce = false;
-    rg.renderFn(() => {
+    rg.preRenderFn(() => {
         recomputeState(state);
 
         if (!fetchedOnce) {
