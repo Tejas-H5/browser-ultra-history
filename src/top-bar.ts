@@ -1,13 +1,12 @@
 import { RenderGroup, div } from 'src/utils/dom-utils';
 import { openExtensionTab } from './open-pages';
-import { renderContext } from './render-context';
 import { SmallButton } from './small-button';
 import { EnabledFlags, clearAllData, collectUrlsFromActiveTab, collectUrlsFromTabs, getEnabledFlags, getStateJSON, loadStateJSON, setEnabledFlags } from './state';
 import { loadFile, saveText } from './utils/file-download';
+import { hasExternalStateChanged, rerenderApp } from './render-context';
 
 export function makeTopBar(isMain: boolean) {
     return function TopBar(rg: RenderGroup) {
-        let needsRefetch = true;
         let enabledFlags: EnabledFlags = {
             extension: true,
             deepCollect: false,
@@ -15,22 +14,19 @@ export function makeTopBar(isMain: boolean) {
 
         async function refetchState() {
             try {
-                rg.renderWithCurrentState();
+                rerenderApp();
 
                 enabledFlags = await getEnabledFlags();
 
-                rg.renderWithCurrentState();
+                rerenderApp();
             } catch (e) {
-                rg.renderWithCurrentState();
-
-                needsRefetch = true;
+                rerenderApp();
             }
         }
 
         rg.preRenderFn(() => {
-            if (needsRefetch || renderContext.forceRefetch) {
-                needsRefetch = false;
-                refetchState();
+            if (hasExternalStateChanged()) {
+                setTimeout(refetchState, 1);
             }
         });
 

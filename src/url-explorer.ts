@@ -1,5 +1,6 @@
 import { SKIP_READ_KEY, getSchemaInstanceFields, runReadTx } from "./default-storage-area";
 import { navigateToUrl } from "./open-pages";
+import { hasExternalStateChanged, rerenderApp } from "./render-context";
 import { SmallButton } from "./small-button";
 import { UrlInfo, deleteDomains, deleteUrls, getCurrentTab, getUrlDomain, urlSchema } from "./state";
 import { clear } from "./utils/array-utils";
@@ -134,7 +135,7 @@ function UrlList(rg: RenderGroup<{ state: UrlExplorerState }>) {
             type
         );
 
-        state.renderUrlExplorer();
+        rerenderApp();
     }
 
     return div({ class: "flex-1 overflow-x-auto" }, [
@@ -336,7 +337,7 @@ function DomainsScreen(rg: RenderGroup<{
         clearTimeout(domainFilterInputDebounceTimeout);
         domainFilterInputDebounceTimeout = setTimeout(() => {
             state.domainFilter.urlContains = val;
-            state.renderUrlExplorer();
+            rerenderApp();
         }, DEBOUNCE_AMOUNT)
     }
 
@@ -484,7 +485,7 @@ function UrlsScreen(rg: RenderGroup<{
         clearTimeout(urlFilterInputDebounceTimeout);
         urlFilterInputDebounceTimeout = setTimeout(() => {
             s.state.urlFilter.urlContains = val;
-            s.state.renderUrlExplorer();
+            rerenderApp();
         }, DEBOUNCE_AMOUNT);
     }
 
@@ -494,7 +495,7 @@ function UrlsScreen(rg: RenderGroup<{
         for (const info of state._filteredUrls) {
             setSelectedSet(state.selectedUrls, info.url, shouldSelect);
         }
-        state.renderUrlExplorer();
+        rerenderApp();
     }
 
     function onHighlightSelected() {
@@ -563,7 +564,7 @@ function UrlsScreen(rg: RenderGroup<{
                 text: s.state.isTileView ? "Tiled" : "List",
                 onClick() {
                     s.state.isTileView = !s.state.isTileView;
-                    s.state.renderUrlExplorer();
+                    rerenderApp();
                 },
                 noBorderRadius: true,
             })),
@@ -572,7 +573,7 @@ function UrlsScreen(rg: RenderGroup<{
                 text: "Images " + (s.state.showImages ? "enabled" : "disabled"),
                 onClick() {
                     s.state.showImages = !s.state.showImages;
-                    s.state.renderUrlExplorer();
+                    rerenderApp();
                 },
                 toggled: s.state.showImages,
                 noBorderRadius: true,
@@ -582,7 +583,7 @@ function UrlsScreen(rg: RenderGroup<{
                 text: "Pages",
                 onClick() {
                     s.state.urlFilter.showPages = !s.state.urlFilter.showPages;
-                    s.state.renderUrlExplorer();
+                    rerenderApp();
                 },
                 toggled: s.state.urlFilter.showPages,
                 noBorderRadius: true,
@@ -591,7 +592,7 @@ function UrlsScreen(rg: RenderGroup<{
                 text: "Assets",
                 onClick() {
                     s.state.urlFilter.showAssets = !s.state.urlFilter.showAssets;
-                    s.state.renderUrlExplorer();
+                    rerenderApp();
                 },
                 toggled: s.state.urlFilter.showAssets,
                 noBorderRadius: true,
@@ -652,7 +653,6 @@ type DomainData = {
 type UrlExplorerStateRefetchOptions = { refetchUrls?: true; refetchDomains?: true; }
 
 type UrlExplorerState = {
-    renderUrlExplorer(): void;
     refetchData(options: UrlExplorerStateRefetchOptions): Promise<void>;
 
     allUrls: Map<string, UrlInfo>;
@@ -771,7 +771,6 @@ export function UrlExplorer(rg: RenderGroup<{
     const state: UrlExplorerState = {
         // data structures that hold urls
 
-        renderUrlExplorer,
         refetchData,
         showImages: false,
         isTileView: true,
@@ -822,7 +821,7 @@ export function UrlExplorer(rg: RenderGroup<{
             state.currentScreen = "url";
         }
 
-        renderUrlExplorer();
+        rerenderApp();
     }
 
     function handleSelectDeselectDomains() {
@@ -888,7 +887,7 @@ export function UrlExplorer(rg: RenderGroup<{
 
             if (options.refetchDomains) {
                 state.status = "loading domains...";
-                renderUrlExplorer();
+                rerenderApp();
                 let allDomains = await runReadTx("allDomains");
 
                 allDomains = allDomains || [];
@@ -898,7 +897,7 @@ export function UrlExplorer(rg: RenderGroup<{
                 }
 
                 state.status = "loading domain counts...";
-                renderUrlExplorer();
+                rerenderApp();
                 const countData = await runReadTx(countTx);
 
 
@@ -925,7 +924,7 @@ export function UrlExplorer(rg: RenderGroup<{
                 }
 
                 state.status = "fetching url..."
-                renderUrlExplorer();
+                rerenderApp();
 
                 const tab = await getCurrentTab();
                 const tabId = tab?.id;
@@ -953,7 +952,7 @@ export function UrlExplorer(rg: RenderGroup<{
                     // fetch the data
 
                     state.status = "loading all data..."
-                    renderUrlExplorer();
+                    rerenderApp();
 
                     const readTx: Record<string, any> = {};
                     for (const domain of state.selectedDomains) {
@@ -999,7 +998,7 @@ export function UrlExplorer(rg: RenderGroup<{
                     }
 
                     state.status = "fetching url metadata..."
-                    renderUrlExplorer();
+                    rerenderApp();
                     const data = await runReadTx(readTx2);
 
                     state.status = "done"
@@ -1018,31 +1017,27 @@ export function UrlExplorer(rg: RenderGroup<{
 
                     urlsFetched = state.allUrls.size;
 
-                    renderUrlExplorer();
+                    rerenderApp();
                 }
             }
 
             state.status = "fetched " + domainsFetched + " domains and " + urlsFetched + " urls in " + (Date.now() - t0) + "ms";
             // + " (cache had " + kvCache.size + " entries)";
-            renderUrlExplorer();
+            rerenderApp();
         } catch (e) {
             console.error(e);
             state.status = "An error occured: " + e;
-            renderUrlExplorer();
+            rerenderApp();
         }
     }
 
-    function renderUrlExplorer() {
-        rg.renderWithCurrentState();
-    }
-
-    let fetchedOnce = false;
     rg.preRenderFn(() => {
         recomputeState(state);
 
-        if (!fetchedOnce) {
-            fetchedOnce = true;
-            refetchData({ refetchDomains: true, refetchUrls: true });
+        if (hasExternalStateChanged()) {
+            setTimeout(() => {
+                refetchData({ refetchDomains: true, refetchUrls: true });
+            }, 1);
         }
     })
 

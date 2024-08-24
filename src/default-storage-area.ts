@@ -1,4 +1,5 @@
 import browser from "webextension-polyfill";
+import { rerenderApp } from "./render-context";
 const defaultStorageArea = browser.storage.local;
 
 // every interaction with the storage area is now cached, since it's way too slow.
@@ -85,25 +86,31 @@ async function setKeys(values: Record<string, any>) {
     }
 }
 
+export function initializeDefaultStorageArea() {
+    console.log("Init defaulted storage area");
+    // we need to update our cache when these values are changed from another context - i.e a popup 
+    // deleting stuff from the database should reflect in the tab.
+    onStateChange((changes) => {
+        console.log("stuff changed!", changes);
+        for (const k in changes) {
+            const change = changes[k];
+            kvCache.set(k, change.newValue);
+        }
+
+        rerenderApp(true);
+    });
+}
+
 export function onStateChange(fn: (changes: browser.Storage.StorageAreaOnChangedChangesType) => void) {
     defaultStorageArea.onChanged.addListener((changes) => {
         fn(changes);
     });
 }
 
-// we need to update our cache when these values are changed from another context - i.e a popup 
-// deleting stuff from the database should reflect in the tab.
-onStateChange((changes) => {
-    for (const k in changes) {
-        const change = changes[k];
-        kvCache.set(k, change.newValue);
-    }
-});
 
 export async function getAllData() {
     return await getKeys(null);
 }
-
 
 
 /**

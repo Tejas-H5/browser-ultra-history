@@ -1,6 +1,5 @@
-import { RenderGroup, appendChild, div, newComponent, newInsertable } from 'src/utils/dom-utils';
-import { onStateChange } from './default-storage-area';
-import { getTheme, setTheme } from './state';
+import { RenderGroup, div, newComponent, setCssVars } from 'src/utils/dom-utils';
+import { insertAndInitializeAppAndRenderContext } from './render-context';
 import { makeTopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
 
@@ -12,7 +11,7 @@ const TopBar = makeTopBar(true);
 
 function App(rg: RenderGroup) {
     return div({
-        class: "fixed col", 
+        class: "fixed col",
         style: "top: 0; bottom: 0; left: 0; right: 0;"
     }, [
         div({ class: "flex-1 col" }, [
@@ -23,7 +22,9 @@ function App(rg: RenderGroup) {
                 div({ class: "flex-1 col" }, [
                     rg.c(UrlExplorer, (c) => c.render({
                         openInNewTab: true,
-                        onHighlightUrl(url) { },
+                        onHighlightUrl(url) {
+                            // TODO: move to the tab and do the highlight...
+                        },
                     }))
                 ]),
             ])
@@ -31,28 +32,7 @@ function App(rg: RenderGroup) {
     ]);
 }
 
-const app = newComponent(App);
-appendChild(
-    newInsertable(document.body),
-    app
-);
+const app = newComponent(App, null);
+setCssVars([["--font-size", "18px"]])
+insertAndInitializeAppAndRenderContext(app);
 
-function rerenderApp() {
-    app.render(null);
-}
-
-let stateChangeDebounceTimout = 0;
-onStateChange(() => {
-    clearTimeout(stateChangeDebounceTimout);
-    stateChangeDebounceTimout = setTimeout(() => {
-        rerenderApp();
-    }, 1000);
-});
-
-(async () => {
-    const theme = await getTheme();
-    console.log("Set theme", theme);
-    await setTheme(theme);
-})();
-
-rerenderApp();

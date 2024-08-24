@@ -1,7 +1,6 @@
-import { RenderGroup, appendChild, div, newComponent, newInsertable, setVisible } from 'src/utils/dom-utils';
-import { onStateChange } from './default-storage-area';
-import { renderContext } from './render-context';
-import { getTheme, sendMessageToCurrentTab, setTheme } from './state';
+import { RenderGroup, div, newComponent, setCssVars, setVisible } from 'src/utils/dom-utils';
+import { insertAndInitializeAppAndRenderContext } from './render-context';
+import { sendMessageToCurrentTab } from './state';
 import { makeTopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
 
@@ -46,35 +45,11 @@ function PopupAppRoot(rg: RenderGroup) {
     return appRoot;
 }
 
-const app = newComponent(PopupAppRoot);
-appendChild(
-    newInsertable(document.body),
-    app
-);
-
 // Set the size to max
 const body = document.querySelector("body")!;
 body.style.width = "800px";
 body.style.height = "600px";
 
-function rerenderApp(forceRefetch = false) {
-    renderContext.forceRefetch = forceRefetch;
-    app.render(null);
-}
-
-let stateChangeDebounceTimout = 0;
-
-onStateChange(() => {
-    clearTimeout(stateChangeDebounceTimout);
-    stateChangeDebounceTimout = setTimeout(() => {
-        rerenderApp(true);
-    }, 1000);
-});
-
-(async () => {
-    const theme = await getTheme();
-    console.log("Set theme", theme);
-    await setTheme(theme);
-})();
-
-rerenderApp();
+const app = newComponent(PopupAppRoot, null);
+setCssVars([["--font-size", "16px"]])
+insertAndInitializeAppAndRenderContext(app);
