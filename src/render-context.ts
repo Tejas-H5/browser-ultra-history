@@ -29,7 +29,7 @@ export function insertAndInitializeAppAndRenderContext(renderFn: () => void) {
         await setTheme(theme);
     })();
 
-    initializeDefaultStorageArea();
+    initializeDefaultStorageArea(() => rerenderApp(true));
 
     rerenderApp(true);
 }

@@ -20,32 +20,36 @@ export type AppTheme = "Light" | "Dark";
 
 // Should become a massive union type.
 export type Message = {
-    // Used to log things to the background script console from other environments.
-    type: "log";
-    message: string;
-    tabUrl: string;
-} | {
-    // Triggers a manual collection from certain tabs, or all tabs if none specified. 
-    // Ideally, we will never need to use this once this extension is working as it's intended, but it's useful for development
-    type: "start_collection_from_tabs";
-    tabIds?: TabId[];
-} | SaveUrlsMessage | {
-    type: "save_urls_finished",
-    numNewUrls: number;
-    id: TabId;
-} | {
-    type: "content_collect_urls"
-} | {
-    type: "content_highlight_url",
-    url: string,
-};
-
-export type SaveUrlsMessage = {
-    type: "save_urls";
-    currentTablUrl: string; 
-    urls: UrlInfo[];
-    tabId: TabId | null;
-};
+    senderTabId?: TabId;
+} & (
+    {
+        // Used to log things to the background script console from other environments.
+        type: "log";
+        message: string;
+        tabUrl: string;
+    } | {
+        type: "save_urls";
+        currentTablUrl: string;
+        urls: UrlInfo[];
+    } | {
+        // Triggers a manual collection from certain tabs, or all tabs if none specified. 
+        // Ideally, we will never need to use this once this extension is working as it's intended, but it's useful for development
+        type: "start_collection_from_tabs";
+        tabIds?: TabId[];
+    } | {
+        type: "save_urls_finished",
+        numNewUrls: number;
+    } | {
+        type: "content_collect_urls"
+    } | {
+        type: "content_highlight_url",
+        url: string,
+    } | {
+        // can't be done within the content script!
+        type: "set_tab_badge_text",
+        text: string;
+    }
+);
 
 export function sendMessage(message: Message) {
     return browser.runtime.sendMessage(message);
@@ -172,6 +176,7 @@ export async function loadStateJSON(json: string) {
 export type EnabledFlags = {
     extension: boolean;
     deepCollect: boolean;
+    silent: boolean;
 }
 
 const DEFAULT_ENABLED_FLAGS: EnabledFlags = {
@@ -179,6 +184,7 @@ const DEFAULT_ENABLED_FLAGS: EnabledFlags = {
     // some of these collections are frankly unnecessary and cause a lot of lag for regular use.
     // only turn this on if you want to have some fun!
     deepCollect: false,
+    silent: false,
 }
 
 export async function getEnabledFlags(): Promise<EnabledFlags> {
@@ -346,7 +352,11 @@ export function writeDomainUrlKeys(writeTx: WriteTx, domain: string, urls: strin
     writeTx["allUrlsCount:" + domain] = urls.length === 0 ? undefined : urls.length;
 }
 
-export async function saveNewUrls(args : SaveUrlsMessage) {
+export async function saveNewUrls(args : Message) {
+    if (args.type !== "save_urls") {
+        throw new Error("Wrong message type!!");
+    }
+
     // Make sure this happens on the background script, to reduce the chances of the script terminating early
     if (process.env.SCRIPT !== "background-main") {
         sendMessage(args);
@@ -359,7 +369,7 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
     const {
         currentTablUrl,
         urls,
-        tabId,
+        senderTabId,
     } = args;
 
     const domainMap = groupByUrlDomain(urls);
@@ -418,8 +428,8 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
             writeTx["allDomains"] = mergeArrays(oldDomains, incomingDomains);
         }
 
-        if (tabId) {
-            writeTx["currentVisibleUrls:" + tabId.tabId] = urls.map(info => info.url);
+        if (senderTabId) {
+            writeTx["currentVisibleUrls:" + senderTabId.tabId] = urls.map(info => info.url);
         }
 
         timer.logTime("writing")
@@ -430,16 +440,16 @@ export async function saveNewUrls(args : SaveUrlsMessage) {
     // return messages back to the sending tab
     {
         timer.logTime("Sending completion messages back to tabs...")
-        if (tabId) {
-            const tab = await browser.tabs.get(tabId.tabId);
+        if (senderTabId) {
+            const tab = await browser.tabs.get(senderTabId.tabId);
             if (tab) {
                 timer.logTime("notifying the current tab...");
 
                 await sendMessageToTabs({
                     type: "save_urls_finished",
                     numNewUrls,
-                    id: tabId
-                }, [tabId]);
+                    senderTabId: senderTabId
+                }, [senderTabId]);
             }
         }
     }

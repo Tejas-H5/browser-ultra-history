@@ -1,13 +1,27 @@
 import { forEachMatch, } from "src/utils/re";
-import { EnabledFlags, UrlInfo, UrlType, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
-import { RenderGroup, div, isVisibleElement, newComponent, setCssVars, setVisible } from "./utils/dom-utils";
 import { hasExternalStateChanged, insertAndInitializeAppAndRenderContext, rerenderApp } from "./render-context";
+import { EnabledFlags, UrlInfo, UrlType, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported, sendMessage } from "./state";
+import { RenderGroup, div, isVisibleElement, newComponent, setVisible } from "./utils/dom-utils";
 
 const MAX_STRING_SIZE = 100;
 
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
-let currentMessage = "";
+
+type Status = ""
+    | "about_to_collect_urls"
+    | "collecting_urls"
+    | "saving_urls"
+    | "save_urls_complete"
+    | "url_not_found"
+    | "scrolling_to_url"
+    | "no_new_urls_found"
+    | "scrolling_to_url_invisible";
+
+let currentStatus: Status = "";
+let numNewUrls = 0;
+let numNewUrlsTotal = 0;
+
 let lastCollectedUrls: LinkQueryResult[] = [];
 let enabledFlags: EnabledFlags | undefined;
 
@@ -38,12 +52,9 @@ recieveMessage(async (message, _sender) => {
     }
 
     if (message.type === "save_urls_finished") {
-        const numNewUrls = message.numNewUrls;
-        if (numNewUrls === 1) {
-            currentMessage = "Saved 1 new URL!";
-        } else {
-            currentMessage = "Saved " + numNewUrls + " new URLs" + (numNewUrls > 0 ? "!" : "");
-        }
+        numNewUrls = message.numNewUrls;
+        numNewUrlsTotal += numNewUrls;
+        currentStatus = "save_urls_complete";
 
         startClearMessageTimeout();
 
@@ -92,11 +103,12 @@ function highlightUrlOnPage(url: string) {
     const res = lastCollectedUrls.find(result => result.linkInfo.url === url);
     const domNode = res?.domNode;
     if (!domNode) {
-        currentMessage = "This URL doesn't seem to be on an item on this page";
+        currentStatus = "url_not_found";
     } else {
-        currentMessage = "Attempting to scroll to the node";
-        if (!isVisibleElement(domNode)) {
-            currentMessage = "Attempting to scroll to the node. However, it may not not work, as it doesn't seem to be visible...";
+        if (isVisibleElement(domNode)) {
+            currentStatus = "scrolling_to_url";
+        } else {
+            currentStatus = "scrolling_to_url_invisible";
         }
 
         domNode.scrollIntoView({
@@ -422,7 +434,7 @@ if (process.env.ENVIRONMENT === "dev") {
 function startClearMessageTimeout() {
     clearTimeout(clearMessageTimeout);
     clearMessageTimeout = setTimeout(() => {
-        currentMessage = "";
+        currentStatus = "";
         rerenderApp();
     }, 1000);
 }
@@ -434,23 +446,155 @@ function collectUrlsDebounced() {
 
     clearTimeout(collectionTimeout);
     collectionTimeout = setTimeout(() => {
-        currentMessage = "Collecting URLS...";
+        currentStatus = "collecting_urls";
         collectionTimeout = 0;
         rerenderApp();
 
         collectLinks();
     }, 1000);
 
-    currentMessage = "About to collect URLS...";
+    currentStatus = "about_to_collect_urls";
     rerenderApp();
+}
+
+function exhaustiveSwitchGuard(_: never): never {
+    throw new Error("unreachable");
 }
 
 const idClass = "c1078634182346018234607012374102";
 
-
 // NOTE: we can't use our style system here - all styles must be inline or created with style generators in this file.
 function ContentOverlayComponent(rg: RenderGroup) {
     let message = "";
+
+    function statusToMessage(): string {
+        switch (currentStatus) {
+            case "":
+                return "";
+            case "url_not_found":
+                return "URL couldn't be found on this page at the moment";
+            case "save_urls_complete":
+                let message;
+                if (numNewUrls === 1) {
+                    message = "Saved 1 new URL!";
+                } else {
+                    message = "Saved " + numNewUrls + " new URLs" + (numNewUrls > 0 ? "!" : "");
+                }
+                message += ` (${numNewUrlsTotal} overall)`;
+                return message;
+            case "about_to_collect_urls":
+                return "About to collect URLS...";
+            case "collecting_urls":
+                return "Collecting urls...";
+            case "no_new_urls_found":
+                return "No new URLs found :(";
+            case "scrolling_to_url":
+                return "Scrolling to url..."
+            case "saving_urls":
+                return "Saving new URLS...";
+            case "scrolling_to_url_invisible":
+                return "Scrolling to url (however, it might not be present) ..."
+            default:
+                break;
+        }
+
+        exhaustiveSwitchGuard(currentStatus);
+    }
+
+    function isStatusSupressed() {
+        if (
+            currentStatus === "scrolling_to_url"
+            || currentStatus === "scrolling_to_url_invisible"
+            || currentStatus === "url_not_found"
+        ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    // return value may only have 4 chars max
+    function statusToBadgeString(): string {
+        switch (currentStatus) {
+            case "about_to_collect_urls":
+                return ".";
+            case "scrolling_to_url":
+            case "scrolling_to_url_invisible":
+            case "collecting_urls":
+                return "..";
+            case "url_not_found":
+            case "no_new_urls_found":
+                return "x";
+            case "saving_urls":
+                return "...";
+            case "save_urls_complete":
+                return numberToBadgeString(numNewUrls);
+            case "":
+                return numberToBadgeString(numNewUrlsTotal);
+            default:
+                break;
+        }
+
+        exhaustiveSwitchGuard(currentStatus);
+    }
+
+
+    let startedFetching = false;
+    async function refetch() {
+        if (startedFetching) {
+            return;
+        }
+        startedFetching = true;
+
+        enabledFlags = await getEnabledFlags();
+
+        startedFetching = false;
+
+        rerenderApp();
+    }
+
+    let needsRecollect = false;
+    rg.preRenderFn(function renderPopup() {
+        if (!enabledFlags) {
+            needsRecollect = true;
+        }
+
+        if (!enabledFlags || hasExternalStateChanged()) {
+            refetch();
+            return;
+        }
+
+        if (needsRecollect) {
+            needsRecollect = false;
+            collectUrlsDebounced();
+        }
+
+        if (!isEnabled()) {
+            overlayRoot.el.remove();
+            clearTimeout(collectionTimeout)
+            clearTimeout(clearMessageTimeout)
+            return;
+        }
+
+        const silent = enabledFlags.silent && isStatusSupressed();
+        if (setVisible(overlayRoot, !silent && !!currentStatus)) {
+            document.body.appendChild(overlayRoot.el);
+
+            message = statusToMessage();
+            if (enabledFlags.deepCollect) {
+                message = "[Deep collect]: " + message;
+            }
+        }
+
+        if (enabledFlags.silent) {
+            // only show the badge if we're collecting this silently.
+            sendMessage({
+                type: "set_tab_badge_text",
+                text: statusToBadgeString(),
+            });
+        }
+
+    })
 
     // NOTE: I've not figured out how to get css classes to work here yet, since it's a content script.
     // TODO: use style generator
@@ -463,33 +607,6 @@ function ContentOverlayComponent(rg: RenderGroup) {
             rg.text(() => message)
         ])
     ]);
-
-    rg.preRenderFn(async function renderPopup() {
-        const isFirstLoad = !enabledFlags;
-        if (!enabledFlags || hasExternalStateChanged()) {
-            enabledFlags = await getEnabledFlags();
-        }
-
-        if (isFirstLoad) {
-            collectUrlsDebounced();
-        }
-
-        if (!isEnabled()) {
-            overlayRoot.el.remove();
-            clearTimeout(collectionTimeout)
-            clearTimeout(clearMessageTimeout)
-            return;
-        }
-
-        if (setVisible(overlayRoot, !!currentMessage)) {
-            document.body.appendChild(overlayRoot.el);
-
-            message = currentMessage;
-            if (enabledFlags.deepCollect) {
-                message = "[Deep collect]: " + message;
-            }
-        }
-    })
 
     return overlayRoot;
 }
@@ -519,21 +636,20 @@ async function collectLinks() {
     lastCollectedUrls = links ?? [];
 
     if (!links || links.length === 0) {
-        currentMessage = "No new URLs found :(";
+        currentStatus = "no_new_urls_found"
 
         rerenderApp();
         startClearMessageTimeout();
         return;
     }
 
-    currentMessage = "Saving new URLs...";
+    currentStatus = "saving_urls";
     rerenderApp();
 
     await saveNewUrls({
         type: "save_urls",
         currentTablUrl: tabUrlString,
         urls: links.map(result => result.linkInfo),
-        tabId: null,
     });
 }
 
@@ -544,3 +660,34 @@ function protocolIsExtension(protocol: string) {
         protocol === 'moz-extension:' ||
         protocol === 'chrome-extension:';
 }
+
+// The web extension badge can only have 4 letters...
+export function numberToBadgeString(n: number) {
+    if (n < 1000) {
+        // 0 - 999
+        return "" + n;
+    }
+
+    if (n < 1000_000) {
+        // 1k - 999k (thousand)
+        return Math.floor(n / 1000) + "k";
+    }
+
+    if (n < 1000_000_000) {
+        // 1m - 999m (million)
+        return Math.floor(n / 1000) + "m";
+    }
+
+    if (n < 1000_000_000_000) {
+        // 1b - 999b (billion)
+        return Math.floor(n / 1000) + "b";
+    }
+
+    if (n < 1000_000_000_000_000) {
+        // 1t - 999t  (trillion)
+        return Math.floor(n / 1000) + "t";
+    }
+
+    throw new Error("Nah aint no way ur number this high bruh 😭😭😭 💀💀💀")
+}
+

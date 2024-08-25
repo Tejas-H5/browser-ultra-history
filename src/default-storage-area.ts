@@ -86,18 +86,16 @@ async function setKeys(values: Record<string, any>) {
     }
 }
 
-export function initializeDefaultStorageArea() {
-    console.log("Init defaulted storage area");
+export function initializeDefaultStorageArea(stateChangeFn: () => void) {
     // we need to update our cache when these values are changed from another context - i.e a popup 
     // deleting stuff from the database should reflect in the tab.
     onStateChange((changes) => {
-        console.log("stuff changed!", changes);
         for (const k in changes) {
             const change = changes[k];
             kvCache.set(k, change.newValue);
         }
 
-        rerenderApp(true);
+        stateChangeFn();
     });
 }
 

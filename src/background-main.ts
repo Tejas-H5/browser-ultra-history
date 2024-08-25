@@ -1,4 +1,4 @@
-import browser from "webextension-polyfill";
+import browser, { browserAction } from "webextension-polyfill";
 import { openExtensionTab } from "./open-pages";
 import { clearAllData, collectUrlsFromTabs, recieveMessage, saveNewUrls } from "./state";
 import { runAllTests } from "./tests";
@@ -15,8 +15,6 @@ function sleep(ms: number) {
 
 async function onStart() {
     try {
-        // await clearAllData();
-
         if (process.env.ENVIRONMENT === "dev") {
             console.log("Loaded background main")
 
@@ -31,68 +29,6 @@ async function onStart() {
                 await collectUrlsFromTabs().catch(console.error)
             }
         }
-
-        // Redirect tracking code has been disbaled for now
-        // browser.webNavigation.onCompleted.addListener(async (details) => {
-        //     const tab = await browser.tabs.get(details.tabId);
-        //     if (!tab) {
-        //         return;
-        //     }
-        //
-        //     const url = tab.url;
-        //     if (!url) {
-        //         return;
-        //     }
-        //
-        //     const recentlyVisited = await getRecentlyVisitedUrls();
-        //     recentlyVisited.push(url);
-        //     await saveRecentlyVisitedUrls(recentlyVisited);
-        // });
-        //
-        // browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
-        //     const enabledFlags = await getEnabledFlags();
-        //     if (!enabledFlags.extension) {
-        //         return;
-        //     }
-        //
-        //     if (details.frameId !== 0) {
-        //         return;
-        //     }
-        //
-        //     const tab = await browser.tabs.get(details.tabId);
-        //     if (!tab) {
-        //         return;
-        //     }
-        //
-        //     const url = tab.url;
-        //     if (!url) {
-        //         return;
-        //     }
-        //
-        //     if (url === "about:blank") {
-        //         const prevUrl = await getUrlBeforeRedirect({ tabId: details.tabId }, Date.now());
-        //
-        //         if (prevUrl && details.url !== prevUrl) {
-        //             await saveOutgoingLinks(
-        //                 prevUrl,
-        //                 [
-        //                     newUrlInfo({
-        //                         urlFrom: prevUrl,
-        //                         url: details.url,
-        //                         redirect: true,
-        //                     }),
-        //                 ],
-        //                 []
-        //             );
-        //         }
-        //     } else {
-        //         await setUrlBeforeRedirect({ tabId: details.tabId }, {
-        //             currentUrl: details.url,
-        //             timestamp: Date.now(),
-        //         });
-        //     }
-        // });
-
     } catch (e) {
         console.error(e);
     }
@@ -102,7 +38,12 @@ recieveMessage(async (message, sender) => {
     if (message.type === "log") {
         console.log(message.tabUrl, ":", message.message);
         return;
-    } 
+    }
+
+    const tabId = sender.tab?.id;
+    if (tabId) {
+        message.senderTabId = { tabId };
+    }
 
     console.log("got message: ", message.type);
 
@@ -114,11 +55,17 @@ recieveMessage(async (message, sender) => {
         return;
     }
 
-    if(message.type === "save_urls") {
-        const tabId = sender.tab?.id;
-        if (tabId) {
-            message.tabId = { tabId };
-        }
+    if (
+        message.type === "set_tab_badge_text"
+        && message.senderTabId
+    ) {
+        await browserAction.setBadgeText({
+            text: message.text,
+            tabId: message.senderTabId.tabId,
+        })
+    }
+
+    if (message.type === "save_urls") {
         await saveNewUrls(message);
         return;
     }

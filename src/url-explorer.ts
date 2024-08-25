@@ -375,7 +375,7 @@ function DomainsScreen(rg: RenderGroup<{
 
         lastVisible = visible;
         if (visible) {
-            state.refetchData({ refetchDomains: true });
+            state.refetchDataEndOfFrame({ refetchDomains: true });
         }
     });
 
@@ -654,6 +654,7 @@ type UrlExplorerStateRefetchOptions = { refetchUrls?: true; refetchDomains?: tru
 
 type UrlExplorerState = {
     refetchData(options: UrlExplorerStateRefetchOptions): Promise<void>;
+    refetchDataEndOfFrame(options: UrlExplorerStateRefetchOptions): void;
 
     allUrls: Map<string, UrlInfo>;
     allDomains: DomainData[];
@@ -772,6 +773,10 @@ export function UrlExplorer(rg: RenderGroup<{
         // data structures that hold urls
 
         refetchData,
+        refetchDataEndOfFrame: (options) => {
+            // NOTE: there's a race condition here. we should handle it later.
+            setTimeout(() => refetchData(options), 1);
+        },
         showImages: false,
         isTileView: true,
         currentScreen: "url",
@@ -1035,9 +1040,7 @@ export function UrlExplorer(rg: RenderGroup<{
         recomputeState(state);
 
         if (hasExternalStateChanged()) {
-            setTimeout(() => {
-                refetchData({ refetchDomains: true, refetchUrls: true });
-            }, 1);
+            state.refetchDataEndOfFrame({ refetchDomains: true, refetchUrls: true });
         }
     })
 
