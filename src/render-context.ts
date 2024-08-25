@@ -4,7 +4,6 @@
 
 import { initializeDefaultStorageArea } from "./default-storage-area";
 import { getTheme, setTheme } from "./state";
-import { Component, appendChild, newInsertable } from "./utils/dom-utils";
 
 // Try not to add too much crap into here
 const renderContext = {
@@ -21,13 +20,8 @@ export function hasExternalStateChanged(): boolean {
     return renderContext.externalStateChanged;
 }
 
-export function insertAndInitializeAppAndRenderContext(app: Component<null, any>) {
-    appendChild(
-        newInsertable(document.body),
-        app
-    );
-
-    renderContext.renderFn = app.renderWithCurrentState;
+export function insertAndInitializeAppAndRenderContext(renderFn: () => void) {
+    renderContext.renderFn = renderFn;
 
     (async () => {
         const theme = await getTheme();

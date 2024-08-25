@@ -1,4 +1,4 @@
-import { RenderGroup, div, newComponent, setCssVars } from 'src/utils/dom-utils';
+import { RenderGroup, appendChild, div, newComponent, newInsertable, setCssVars } from 'src/utils/dom-utils';
 import { insertAndInitializeAppAndRenderContext } from './render-context';
 import { makeTopBar } from './top-bar';
 import { UrlExplorer } from './url-explorer';
@@ -34,5 +34,6 @@ function App(rg: RenderGroup) {
 
 const app = newComponent(App, null);
 setCssVars([["--font-size", "18px"]])
-insertAndInitializeAppAndRenderContext(app);
+appendChild(newInsertable(document.body), app);
+insertAndInitializeAppAndRenderContext(app.renderWithCurrentState);
 

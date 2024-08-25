@@ -1,4 +1,4 @@
-import { RenderGroup, div, newComponent, setCssVars, setVisible } from 'src/utils/dom-utils';
+import { RenderGroup, appendChild, div, newComponent, newInsertable, setCssVars, setVisible } from 'src/utils/dom-utils';
 import { insertAndInitializeAppAndRenderContext } from './render-context';
 import { sendMessageToCurrentTab } from './state';
 import { makeTopBar } from './top-bar';
@@ -52,4 +52,5 @@ body.style.height = "600px";
 
 const app = newComponent(PopupAppRoot, null);
 setCssVars([["--font-size", "16px"]])
-insertAndInitializeAppAndRenderContext(app);
+appendChild(newInsertable(document.body), app);
+insertAndInitializeAppAndRenderContext(app.renderWithCurrentState);

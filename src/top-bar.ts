@@ -14,8 +14,6 @@ export function makeTopBar(isMain: boolean) {
 
         async function refetchState() {
             try {
-                rerenderApp();
-
                 enabledFlags = await getEnabledFlags();
 
                 rerenderApp();

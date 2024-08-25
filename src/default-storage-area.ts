@@ -101,7 +101,7 @@ export function initializeDefaultStorageArea() {
     });
 }
 
-export function onStateChange(fn: (changes: browser.Storage.StorageAreaOnChangedChangesType) => void) {
+function onStateChange(fn: (changes: browser.Storage.StorageAreaOnChangedChangesType) => void) {
     defaultStorageArea.onChanged.addListener((changes) => {
         fn(changes);
     });

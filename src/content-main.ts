@@ -1,62 +1,26 @@
 import { forEachMatch, } from "src/utils/re";
-import { onStateChange } from "./default-storage-area";
 import { EnabledFlags, UrlInfo, UrlType, getEnabledFlags, newUrlInfo, recieveMessage, saveNewUrls, sendLog as sendLogImported } from "./state";
-import { div, isVisibleElement, setText, setVisible } from "./utils/dom-utils";
-
-declare global {
-    interface Window {
-        __ran_content_script?: boolean;
-    }
-}
+import { RenderGroup, div, isVisibleElement, newComponent, setCssVars, setVisible } from "./utils/dom-utils";
+import { hasExternalStateChanged, insertAndInitializeAppAndRenderContext, rerenderApp } from "./render-context";
 
 const MAX_STRING_SIZE = 100;
 
-let saving = false;
-let noneFound = false;
 let collectionTimeout = 0;
 let clearMessageTimeout = 0;
 let currentMessage = "";
-let initialized = false;
 let lastCollectedUrls: LinkQueryResult[] = [];
 let enabledFlags: EnabledFlags | undefined;
 
 const tabUrlString = window.location.href;
 const tabUrl = new URL(tabUrlString);
 
-// Only works _after_ init() is called
 function isEnabled() {
-    return initialized && enabledFlags?.extension;
-}
-
-async function init() {
-    if (initialized) {
-        return;
+    if (protocolIsExtension(tabUrl.protocol)) {
+        return false;
     }
 
-    initialized = true;
-    enabledFlags = await getEnabledFlags();
-
-    // disable this script if we are on the extension page itself.
-    if (
-        !isEnabled() ||
-        protocolIsExtension(tabUrl.protocol)
-    ) {
-        return;
-    }
-
-    renderPopup();
-
-    // Collect URLs as soon as we load the page (after the debounce time, of course)
-    collectUrlsDebounced();
+    return enabledFlags?.extension;
 }
-
-function uninit() {
-    popupRoot.el.remove();
-    clearTimeout(collectionTimeout)
-    clearTimeout(clearMessageTimeout)
-    initialized = false;
-}
-
 
 recieveMessage(async (message, _sender) => {
     if (!isEnabled()) {
@@ -74,8 +38,6 @@ recieveMessage(async (message, _sender) => {
     }
 
     if (message.type === "save_urls_finished") {
-        saving = false;
-
         const numNewUrls = message.numNewUrls;
         if (numNewUrls === 1) {
             currentMessage = "Saved 1 new URL!";
@@ -85,91 +47,16 @@ recieveMessage(async (message, _sender) => {
 
         startClearMessageTimeout();
 
-        renderPopup();
+        rerenderApp();
         return;
     }
 
 }, "content");
 
-function onScroll() {
-    if (!isEnabled()) {
-        return;
-    }
-
-    collectUrlsDebounced();
-}
-
 // Collect URLs whenever we scroll the page.
 // Some pages will bind the scroll wheel to something, so we improvise
-document.addEventListener("scroll", onScroll);
-document.addEventListener("wheel", onScroll);
-
-onStateChange(async () => {
-    const enabledFlags = await getEnabledFlags();
-    if (enabledFlags.extension) {
-        init();
-    } else {
-        uninit();
-    }
-});
-
-
-// https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml
-// (moz-extension isn't on there, but I use firefox, so I know it's legit)
-function protocolIsExtension(protocol: string) {
-    return protocol === 'ms-browser-extension:' ||
-        protocol === 'moz-extension:' ||
-        protocol === 'chrome-extension:';
-}
-
-async function collectLinks() {
-    if (!isEnabled() ) {
-        return;
-    }
-
-    const tabUrlString = window.location.href;
-    const tabUrl = new URL(tabUrlString);
-
-    // don't allow collecting links in special circumstances
-    if (protocolIsExtension(tabUrl.protocol)) {
-        return;
-    }
-
-    saving = false;
-    noneFound = false;
-    if (collectionTimeout !== 0) {
-        clearTimeout(collectionTimeout);
-        clearTimeout(clearMessageTimeout);
-        collectionTimeout = 0;
-    }
-
-    renderPopup();
-
-    const links = getLinks();
-    lastCollectedUrls = links ?? [];
-
-    if (!links || links.length === 0) {
-        saving = false;
-        noneFound = true;
-        currentMessage = "No new URLs found :(";
-
-        renderPopup();
-        startClearMessageTimeout();
-        return;
-    }
-
-    saving = true;
-    currentMessage = "Saving new URLs...";
-    renderPopup();
-
-    await saveNewUrls({
-        type: "save_urls",
-        currentTablUrl: tabUrlString, 
-        urls: links.map(result => result.linkInfo),
-        tabId: null,
-    });
-}
-
+document.addEventListener("scroll", collectUrlsDebounced);
+document.addEventListener("wheel", collectUrlsDebounced);
 
 const rectEl = div({ id: "highlightRectThing", style: "position: fixed; background-color: #F00; z-index: 999999;" });
 let removeTimout = 0;
@@ -186,7 +73,7 @@ function animateOpacity() {
         rectEl.el.remove();
     }
 }
-export function highlightPortionOfScreen({top, bottom, left, right} : { top: number, bottom: number, left: number, right: number }) {
+export function highlightPortionOfScreen({ top, bottom, left, right }: { top: number, bottom: number, left: number, right: number }) {
     document.body.appendChild(rectEl.el);
 
     opacity = 1;
@@ -225,7 +112,7 @@ function highlightUrlOnPage(url: string) {
         }, 300)
     }
 
-    renderPopup();
+    rerenderApp();
     startClearMessageTimeout();
 }
 
@@ -234,7 +121,7 @@ function sendLog(message: string) {
     sendLogImported(tabUrl, message);
 }
 
-function getStyleName(inlineStyleAttributeText: string, startOfValue: number): string{ 
+function getStyleName(inlineStyleAttributeText: string, startOfValue: number): string {
     const colonIdx = inlineStyleAttributeText.lastIndexOf(":", startOfValue);
     if (colonIdx === -1) {
         return "";
@@ -245,7 +132,7 @@ function getStyleName(inlineStyleAttributeText: string, startOfValue: number): s
         semiColonIdx = 0;
     }
 
-    return inlineStyleAttributeText.substring(semiColonIdx +1, colonIdx);
+    return inlineStyleAttributeText.substring(semiColonIdx + 1, colonIdx);
 }
 
 function cssUrlRegex() {
@@ -318,7 +205,7 @@ function findImagesFor(el: Element): string[] | undefined {
                 if (protocolIsExtension(protocol)) {
                     continue;
                 }
-            } catch(e) {
+            } catch (e) {
                 continue;
             }
 
@@ -355,8 +242,8 @@ function getLinks(): LinkQueryResult[] | undefined {
         url = url.trim();
         if (
             !url ||
-            url.startsWith("data:") || 
-            url.startsWith("javascript:") 
+            url.startsWith("data:") ||
+            url.startsWith("javascript:")
         ) {
             return;
         }
@@ -378,7 +265,7 @@ function getLinks(): LinkQueryResult[] | undefined {
 
             linkInfo.url = updatedUrl;
 
-        } catch(e) {
+        } catch (e) {
             console.error("Error collecting link:", linkInfo, e);
             // this was an invalid url. dont bother collecting it
             return;
@@ -467,7 +354,7 @@ function getLinks(): LinkQueryResult[] | undefined {
                 const url = matches[1];
 
                 const styleName = getStyleName(val, start);
-                pushUrl({  url: url, styleName: [styleName], type: "url" }, el);
+                pushUrl({ url: url, styleName: [styleName], type: "url" }, el);
             });
         }
 
@@ -510,16 +397,16 @@ function getLinks(): LinkQueryResult[] | undefined {
 
             // Saving the entire text will slow down the extention and even cause saving to fail...
             const CONTEXT = 50;
-            const prefix = start-CONTEXT > 0 ? "..." : "";
-            const suffix = start+CONTEXT < val.length ? "..." : "";
-            const contextString = prefix + val.substring(start-CONTEXT, end+CONTEXT) + suffix;
+            const prefix = start - CONTEXT > 0 ? "..." : "";
+            const suffix = start + CONTEXT < val.length ? "..." : "";
+            const contextString = prefix + val.substring(start - CONTEXT, end + CONTEXT) + suffix;
 
-            pushUrl({ 
-                url: url, 
-                linkText: [contextString], 
-                parentType: !parentElType ? undefined : [parentElType] ,
+            pushUrl({
+                url: url,
+                linkText: [contextString],
+                parentType: !parentElType ? undefined : [parentElType],
                 type: "url"
-            }, parentEl); 
+            }, parentEl);
         });
     }
 
@@ -536,42 +423,124 @@ function startClearMessageTimeout() {
     clearTimeout(clearMessageTimeout);
     clearMessageTimeout = setTimeout(() => {
         currentMessage = "";
-        renderPopup();
+        rerenderApp();
     }, 1000);
 }
 
 function collectUrlsDebounced() {
+    if (!isEnabled()) {
+        return;
+    }
+
     clearTimeout(collectionTimeout);
     collectionTimeout = setTimeout(() => {
         currentMessage = "Collecting URLS...";
         collectionTimeout = 0;
-        renderPopup();
+        rerenderApp();
 
         collectLinks();
     }, 1000);
 
     currentMessage = "About to collect URLS...";
-    renderPopup();
+    rerenderApp();
 }
 
+const idClass = "c1078634182346018234607012374102";
 
 
-// NOTE: I've not figured out how to get css classes to work here yet, since it's a content script.
-const popupRoot = div({ 
-    style: "all: unset; z-index: 999999; font-family: monospace; font-size: 16px; position: fixed; bottom: 10px; left: 10px; background-color: black; color: white; text-align: right;" +
-        "padding: 10px;"
-});
+// NOTE: we can't use our style system here - all styles must be inline or created with style generators in this file.
+function ContentOverlayComponent(rg: RenderGroup) {
+    let message = "";
 
-function renderPopup() {
+    // NOTE: I've not figured out how to get css classes to work here yet, since it's a content script.
+    // TODO: use style generator
+    const overlayRoot = div({
+        class: idClass,
+        style: "all: unset; z-index: 999999; font-family: monospace; font-size: 14px; position: fixed; top: 0px; left: 0px; background-color: rgb(0,0,0,0.5); color: #FFF; text-align: right;" +
+            "padding: 2px;"
+    }, [
+        div({}, [
+            rg.text(() => message)
+        ])
+    ]);
+
+    rg.preRenderFn(async function renderPopup() {
+        const isFirstLoad = !enabledFlags;
+        if (!enabledFlags || hasExternalStateChanged()) {
+            enabledFlags = await getEnabledFlags();
+        }
+
+        if (isFirstLoad) {
+            collectUrlsDebounced();
+        }
+
+        if (!isEnabled()) {
+            overlayRoot.el.remove();
+            clearTimeout(collectionTimeout)
+            clearTimeout(clearMessageTimeout)
+            return;
+        }
+
+        if (setVisible(overlayRoot, !!currentMessage)) {
+            document.body.appendChild(overlayRoot.el);
+
+            message = currentMessage;
+            if (enabledFlags.deepCollect) {
+                message = "[Deep collect]: " + message;
+            }
+        }
+    })
+
+    return overlayRoot;
+}
+
+const popup = newComponent(ContentOverlayComponent, null);
+for (const oldPopup of document.querySelectorAll("." + idClass)) {
+    oldPopup.remove();
+}
+insertAndInitializeAppAndRenderContext(popup.renderWithCurrentState);
+
+async function collectLinks() {
     if (!isEnabled()) {
-        popupRoot.el.remove();
         return;
     }
 
-    if (setVisible(popupRoot, !!currentMessage)) {
-        document.body.appendChild(popupRoot.el);
-        setText(popupRoot, currentMessage);
+    const tabUrlString = window.location.href;
+
+    if (collectionTimeout !== 0) {
+        clearTimeout(collectionTimeout);
+        clearTimeout(clearMessageTimeout);
+        collectionTimeout = 0;
     }
+
+    rerenderApp();
+
+    const links = getLinks();
+    lastCollectedUrls = links ?? [];
+
+    if (!links || links.length === 0) {
+        currentMessage = "No new URLs found :(";
+
+        rerenderApp();
+        startClearMessageTimeout();
+        return;
+    }
+
+    currentMessage = "Saving new URLs...";
+    rerenderApp();
+
+    await saveNewUrls({
+        type: "save_urls",
+        currentTablUrl: tabUrlString,
+        urls: links.map(result => result.linkInfo),
+        tabId: null,
+    });
 }
 
-init();
+// https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml
+// (moz-extension isn't on there, but I use firefox, so I know it's legit)
+function protocolIsExtension(protocol: string) {
+    return protocol === 'ms-browser-extension:' ||
+        protocol === 'moz-extension:' ||
+        protocol === 'chrome-extension:';
+}
